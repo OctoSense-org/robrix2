@@ -478,10 +478,7 @@ fn text_preview_of_message(
                 htmlize::escape_text(&video.body)
             }
         ),
-        MessageType::_Custom(custom) => format!(
-            "[Custom message]: {:?}",
-            custom,
-        ),
+        MessageType::_Custom(_) => htmlize::escape_text(msg.body()).to_string(),
         other => format!(
             "[Unknown message type]: {}",
             htmlize::escape_text(other.body()),
@@ -833,4 +830,35 @@ pub fn text_preview_of_room_membership_change(
             format!("denied {}'s request to join this room.", change_user_id),
     };
     Some(TextPreview::from((text, BeforeText::UsernameWithoutColon)))
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn custom_message(body: &str, detail: &str) -> MessageType {
+        serde_json::from_value(serde_json::json!({
+            "msgtype": "com.agentchat.approval.status.v1",
+            "body": body,
+            "com.agentchat.approval": { "kind": "status", "internal_detail": detail },
+        })).expect("valid custom room message")
+    }
+
+    #[test]
+    fn custom_message_preview_shows_escaped_body_without_protocol_details() {
+        let message = custom_message("等待 <owner> & approval", "PRIVATE_SENTINEL");
+        let preview = text_preview_of_message(&message, "agent").text;
+        assert_eq!(preview, "等待 &lt;owner&gt; &amp; approval");
+        assert!(!preview.contains("PRIVATE_SENTINEL"));
+        assert!(!preview.contains("CustomEventContent"));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_custom_preview_depends_only_on_escaped_body(body in any::<String>(), detail in any::<String>()) {
+            let preview = text_preview_of_message(&custom_message(&body, &detail), "agent").text;
+            prop_assert_eq!(preview, htmlize::escape_text(&body).to_string());
+        }
+    }
 }
