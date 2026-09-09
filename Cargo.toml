@@ -387,10 +387,7 @@ used_underscore_binding = "allow"
 ## sandbox dirs, mobile-layout detection, ArkUI native inputs), with the legacy
 ## `old/` crate copies removed so the repo resolves as a cargo git dependency.
 [patch."https://github.com/makepad/makepad"]
-## Pinned to ZhangHanDong/makepad dev at the merge of PR #6 (Splash-isolate
-## shader identity, headless renderer correctness, ttf-parser gvar-alloc for
-## Apple variable fonts, the CoreText outline fallback for hvgl-only system
-## fonts like PingFang, and the closed-Modal overdraw fix), plus the
-## selectable-Html fix from PR #5.
-makepad-widgets = { git = "https://github.com/ZhangHanDong/makepad", rev = "1dd8d372cfb65b20160a3782586ed4d593cf8193", features = ["serde"] }
-makepad-code-editor = { git = "https://github.com/ZhangHanDong/makepad", rev = "1dd8d372cfb65b20160a3782586ed4d593cf8193" }
+## Track the fork's dev branch; Cargo.lock records the exact tested commit.
+## Build Makepad Studio from that same commit for GUI E2E tests.
+makepad-widgets = { git = "https://github.com/ZhangHanDong/makepad", branch = "dev" }
+makepad-code-editor = { git = "https://github.com/ZhangHanDong/makepad", branch = "dev" }

@@ -816,7 +816,9 @@ impl MatchEvent for App {
         // surfaces are light, so agent splash-card content rendered near-white
         // text on white — visually blank. Select the light theme for every
         // isolate before any splash card evaluates.
-        cx.set_splash_isolate_theme(live_id!(light));
+        makepad_widgets::widget_async::set_splash_theme(
+            makepad_widgets::widget_async::SplashTheme::Light,
+        );
 
         // only init logging/tracing once
         let _ = tracing_subscriber::fmt()

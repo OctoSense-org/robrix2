@@ -10,15 +10,17 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::proto::{decode, Incoming, Key, Modifiers, Msg, WidgetSnapshot};
+use crate::evidence::{Diagnostics, OwnedChild, validate_capture, write_capture};
 
 pub struct Driver {
-    child: Child,
+    child: OwnedChild,
     stdin: ChildStdin,
     rx: Receiver<Incoming>,
     pending: VecDeque<Incoming>,
@@ -28,14 +30,12 @@ pub struct Driver {
     clock: f64,
     frames_dir: PathBuf,
     pub last_focus_rect: Option<(f64, f64, f64, f64)>,
-    pub logs: Vec<String>,
+    diagnostics: Arc<Mutex<Diagnostics>>,
     /// Set UX_HARNESS_TRACE=1 to mirror the whole protocol exchange to stderr.
     trace: bool,
 }
 
 const TICK_STEP: f64 = 1.0 / 60.0;
-/// How long to wait for any single line from the app before declaring it hung.
-const LINE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a Tick may go unanswered before the UI counts as idle. Generous
 /// because the headless backend rasterises on the CPU.
 const IDLE_WINDOW: Duration = Duration::from_millis(2500);
@@ -71,9 +71,9 @@ impl Driver {
             cmd.env(k, v);
         }
 
-        let mut child = cmd
+        let mut child = OwnedChild(cmd
             .spawn()
-            .map_err(|e| format!("cannot spawn {}: {e}", app_bin.display()))?;
+            .map_err(|e| format!("cannot spawn {}: {e}", app_bin.display()))?);
 
         let stdin = child.stdin.take().ok_or("no stdin on child")?;
         let stdout = child.stdout.take().ok_or("no stdout on child")?;
@@ -86,7 +86,7 @@ impl Driver {
             for line in reader.lines() {
                 let Ok(line) = line else { break };
                 if trace {
-                    eprintln!("← {}", &line[..line.len().min(220)]);
+                    eprintln!("← {}", line.chars().take(220).collect::<String>());
                 }
                 if let Some(msg) = decode(&line) {
                     if tx.send(msg).is_err() {
@@ -95,8 +95,9 @@ impl Driver {
                 }
             }
         });
-        // Drain stderr so a chatty app can never fill the pipe and deadlock.
-        let (etx, erx) = mpsc::channel();
+        // Drain stderr into a bounded tail, including errors outside the protocol.
+        let diagnostics = Arc::new(Mutex::new(Diagnostics::new(64 * 1024)));
+        let stderr_diagnostics = diagnostics.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
@@ -104,14 +105,10 @@ impl Driver {
                 if trace {
                     eprintln!("!! {line}");
                 }
-                if etx.send(line).is_err() {
-                    break;
+                if let Ok(mut log) = stderr_diagnostics.lock() {
+                    log.push(format!("stderr: {line}"));
                 }
             }
-        });
-        thread::spawn(move || {
-            // Keep the receiver alive; stderr is only surfaced on failure.
-            while erx.recv().is_ok() {}
         });
 
         Ok(Driver {
@@ -123,15 +120,24 @@ impl Driver {
             clock: 0.0,
             frames_dir: frames_dir.to_path_buf(),
             last_focus_rect: None,
-            logs: Vec::new(),
+            diagnostics,
             trace: std::env::var("UX_HARNESS_TRACE").is_ok(),
         })
+    }
+
+    fn record_log(&self, line: String) {
+        if let Ok(mut log) = self.diagnostics.lock() { log.push(line); }
+    }
+
+    pub fn diagnostic_text(&self) -> String {
+        self.diagnostics.lock().map(|log| log.text()).unwrap_or_else(|_| "diagnostics lock poisoned".into())
     }
 
     fn send(&mut self, msg: Msg) -> Result<(), String> {
         let line = msg.to_line();
         if self.trace {
-            eprintln!("→ {}", line.trim());
+            if matches!(msg, Msg::TextInput { .. }) { eprintln!("→ TextInput [redacted]"); }
+            else { eprintln!("→ {}", line.trim()); }
         }
         self.stdin
             .write_all(line.as_bytes())
@@ -139,12 +145,15 @@ impl Driver {
         self.stdin.flush().map_err(|e| format!("flush failed: {e}"))
     }
 
-    fn recv(&mut self) -> Result<Incoming, String> {
+    fn recv_until(&mut self, deadline: Instant) -> Result<Incoming, String> {
+        if Instant::now() >= deadline { return Err("app response deadline expired".into()); }
         if let Some(msg) = self.pending.pop_front() {
+            if let Incoming::ProtocolError(error) = msg { return Err(error); }
             return Ok(msg);
         }
-        match self.rx.recv_timeout(LINE_TIMEOUT) {
+        match self.rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(msg) => {
+                if let Incoming::ProtocolError(error) = msg { return Err(error); }
                 if let Incoming::KeyFocusRect { x, y, width, height } = &msg {
                     self.last_focus_rect = match (x, y, width, height) {
                         (Some(x), Some(y), Some(w), Some(h)) => Some((*x, *y, *w, *h)),
@@ -153,7 +162,7 @@ impl Driver {
                 }
                 Ok(msg)
             }
-            Err(RecvTimeoutError::Timeout) => Err("app went silent (30s)".to_string()),
+            Err(RecvTimeoutError::Timeout) => Err("app response deadline expired".to_string()),
             Err(RecvTimeoutError::Disconnected) => Err("app exited".to_string()),
         }
     }
@@ -165,9 +174,9 @@ impl Driver {
             if Instant::now() > deadline {
                 return Err("timed out waiting for AfterStartup".to_string());
             }
-            match self.recv()? {
+            match self.recv_until(deadline)? {
                 Incoming::AfterStartup => return Ok(()),
-                Incoming::Log(l) => self.logs.push(l),
+                Incoming::Log(l) => self.record_log(l),
                 _ => {}
             }
         }
@@ -198,7 +207,7 @@ impl Driver {
             // instead of pipelining more Ticks — queueing them just makes the
             // app render frames nobody asked for.
             let mut wants_more = false;
-            let deadline = Instant::now() + IDLE_WINDOW;
+            let deadline = (Instant::now() + IDLE_WINDOW).min(budget);
             loop {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
@@ -209,7 +218,8 @@ impl Driver {
                         wants_more = true;
                         break;
                     }
-                    Ok(Incoming::Log(l)) => self.logs.push(l),
+                    Ok(Incoming::Log(l)) => self.record_log(l),
+                    Ok(Incoming::ProtocolError(error)) => return Err(error),
                     Ok(Incoming::KeyFocusRect { x, y, width, height }) => {
                         self.last_focus_rect = match (x, y, width, height) {
                             (Some(x), Some(y), Some(w), Some(h)) => Some((x, y, w, h)),
@@ -258,11 +268,7 @@ impl Driver {
     pub fn click(&mut self, x: f64, y: f64) -> Result<usize, String> {
         let time = self.clock;
         self.send(Msg::MouseMove { x, y, time, modifiers: Modifiers::default() })?;
-        self.settle(30)?;
-        let time = self.clock;
         self.send(Msg::MouseDown { x, y, time, modifiers: Modifiers::default() })?;
-        self.settle(30)?;
-        let time = self.clock;
         self.send(Msg::MouseUp { x, y, time, modifiers: Modifiers::default() })?;
         self.settle(24)
     }
@@ -270,8 +276,6 @@ impl Driver {
     pub fn key(&mut self, key: Key, modifiers: Modifiers) -> Result<usize, String> {
         let time = self.clock;
         self.send(Msg::KeyDown { key, time, modifiers })?;
-        self.settle(60)?;
-        let time = self.clock;
         self.send(Msg::KeyUp { key, time, modifiers })?;
         self.settle(120)
     }
@@ -321,7 +325,8 @@ impl Driver {
                 Ok(Incoming::WidgetSnapshot { request_id, widgets }) if request_id == id => {
                     return Ok(widgets)
                 }
-                Ok(Incoming::Log(l)) => self.logs.push(l),
+                Ok(Incoming::Log(l)) => self.record_log(l),
+                Ok(Incoming::ProtocolError(error)) => return Err(error),
                 Ok(other) => self.pending.push_back(other),
                 Err(RecvTimeoutError::Timeout) => {
                     return Err("no WidgetSnapshot response within 180s".to_string())
@@ -331,41 +336,24 @@ impl Driver {
         }
     }
 
-    /// Force a repaint and return the newest frame file on disk.
-    ///
-    /// The headless backend writes every drawn frame to `MAKEPAD_HEADLESS_OUT_DIR`,
-    /// so "capture" is really "make it draw, then take the latest file".
+    /// Save only the PNG returned for this request; old on-disk frames are not evidence.
     pub fn capture(&mut self, label: &str) -> Result<Option<PathBuf>, String> {
         let id = self.next_request_id;
         self.next_request_id += 1;
-        let before = latest_frame(&self.frames_dir);
+        let deadline = Instant::now() + Duration::from_secs(25);
         self.send(Msg::Screenshot { request_id: id })?;
         self.settle(120)?;
-
-        // The frame is written by the render pass, which lands after the Tick
-        // that triggered it — and encoding a full-window PNG on the CPU is not
-        // instant. Wait for a file that is actually newer than the one we had,
-        // instead of assuming settle() outran the encoder.
-        let deadline = Instant::now() + Duration::from_secs(25);
-        let mut path = None;
         while Instant::now() < deadline {
-            match latest_frame(&self.frames_dir) {
-                Some(p) if Some(&p) != before.as_ref() => {
-                    path = Some(p);
-                    break;
+            match self.recv_until(deadline)? {
+                Incoming::Screenshot { request_ids, width, height, png } if request_ids.contains(&id) => {
+                    validate_capture(id, &request_ids, width, height, &png)?;
+                    return write_capture(&self.frames_dir, label, &png).map(Some);
                 }
-                Some(p) => {
-                    path = Some(p);
-                    thread::sleep(Duration::from_millis(150));
-                }
-                None => thread::sleep(Duration::from_millis(150)),
+                Incoming::Log(line) => self.record_log(line),
+                _ => {}
             }
         }
-        let Some(path) = path else { return Ok(None) };
-        // Give the frame a stable, human-meaningful name next to the raw one.
-        let named = self.frames_dir.join(format!("scene_{label}.png"));
-        let _ = std::fs::copy(&path, &named);
-        Ok(Some(named))
+        Err(format!("no screenshot response for request {id} before deadline"))
     }
 
     pub fn shutdown(mut self) {
@@ -377,22 +365,41 @@ impl Driver {
     }
 }
 
-/// Newest `window_*_frame_*.png` in a directory, by modified time.
-pub fn latest_frame(dir: &Path) -> Option<PathBuf> {
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(dir).ok()? {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        let name = path.file_name()?.to_string_lossy().to_string();
-        if !name.starts_with("window_") || !name.ends_with(".png") {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        let Ok(mtime) = meta.modified() else { continue };
-        match &best {
-            Some((t, _)) if *t >= mtime => {}
-            _ => best = Some((mtime, path)),
-        }
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn test_driver(directory: &Path) -> (Driver, mpsc::Sender<Incoming>) {
+        let mut child = OwnedChild(Command::new("/bin/cat")
+            .stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap());
+        let stdin = child.stdin.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        (Driver { child, stdin, rx, pending: VecDeque::new(), next_request_id: 18,
+            clock: 0.0, frames_dir: directory.into(), last_focus_rect: None,
+            diagnostics: Arc::new(Mutex::new(Diagnostics::new(1024))), trace: false }, tx)
     }
-    best.map(|(_, p)| p)
+
+    #[test]
+    fn expired_response_deadline_rejects_queued_frame() {
+        let (mut driver, _tx) = test_driver(Path::new("."));
+        driver.pending.push_back(Incoming::Screenshot { request_ids: vec![18], width: 1, height: 1, png: vec![] });
+        let result = driver.recv_until(Instant::now() - Duration::from_millis(1));
+        assert!(result.is_err(), "an already queued frame must not defeat an expired deadline");
+    }
+
+    #[test]
+    fn capture_deadline_never_reuses_old_file_or_response() {
+        let directory = std::env::temp_dir().join(format!("ux-stale-capture-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let old_frame = directory.join("window_0_frame_1.png");
+        std::fs::write(&old_frame, b"old frame must never become evidence").unwrap();
+        let (mut driver, tx) = test_driver(&directory);
+        tx.send(Incoming::Screenshot { request_ids: vec![17], width: 1, height: 1, png: vec![] }).unwrap();
+        let result = driver.capture("deadline");
+        assert!(result.is_err());
+        assert!(!directory.join("scene_deadline.png").exists());
+        assert_eq!(std::fs::read(&old_frame).unwrap(), b"old frame must never become evidence");
+        drop(driver);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
