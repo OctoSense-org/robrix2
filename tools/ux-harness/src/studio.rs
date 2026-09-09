@@ -2,22 +2,78 @@
 //! own that build and never stops, replaces or clears it on disconnect.
 
 use std::net::{SocketAddr, TcpStream};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use makepad_micro_serde::{DeBin, DeJson, SerBin, SerJson};
 use makepad_studio_protocol::{StudioToApp, StudioToAppVec, hub_protocol::{ClientId, QueryId, ClientToHub, ClientToHubEnvelope, HubToClient}};
 use serde::Deserialize;
-use tungstenite::{Message, WebSocket};
+use tungstenite::{Message, WebSocket, HandshakeError};
 use crate::{evidence::{Diagnostics, validate_capture, write_capture}, locator::{Selector, unique_match, input_center}, proto::{Key, Modifiers, Msg, WidgetSnapshot, strip_trailing_commas}};
 
 pub struct StudioDriver {
-    socket: WebSocket<TcpStream>,
+    socket: WebSocket<StudioStream>,
     client_id: ClientId,
     counter: u64,
     build_id: QueryId,
     diagnostics: Diagnostics,
     last_snapshot: Vec<WidgetSnapshot>,
     windowed: bool,
+}
+
+fn transport_wait(deadline: Instant, now: Instant) -> Option<Duration> {
+    let remaining = deadline.saturating_duration_since(now);
+    if remaining.is_zero() { None } else { Some(remaining.min(Duration::from_millis(50))) }
+}
+
+// tungstenite can perform several underlying reads in one handshake/read call.
+// Apply the same absolute deadline to each one, including continuous fragments.
+#[derive(Debug)]
+struct StudioStream {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+impl StudioStream {
+    fn wait(&self) -> io::Result<Duration> {
+        transport_wait(self.deadline, Instant::now())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "Studio phase deadline expired"))
+    }
+
+    fn normalize_wait<T>(result: io::Result<T>) -> io::Result<T> {
+        result.map_err(|error| match error.kind() {
+            // Platforms differ in the error used for a socket timeout. The
+            // handshake keeps its buffered state only for WouldBlock.
+            io::ErrorKind::TimedOut | io::ErrorKind::Interrupted => io::Error::new(io::ErrorKind::WouldBlock, error),
+            _ => error,
+        })
+    }
+}
+
+impl Read for StudioStream {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.wait()?))?;
+        Self::normalize_wait(self.stream.read(bytes))
+    }
+}
+
+impl Write for StudioStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        loop {
+            self.stream.set_write_timeout(Some(self.wait()?))?;
+            match Self::normalize_wait(self.stream.write(bytes)) {
+                // WouldBlock reports no written bytes. Retry this TCP write,
+                // retaining tungstenite's frame/cursor and the fixed deadline.
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                result => return result,
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.set_write_timeout(Some(self.wait()?))?;
+        Self::normalize_wait(self.stream.flush())
+    }
 }
 
 fn snapshot_evidence(widgets: &[WidgetSnapshot]) -> Result<Vec<u8>, String> {
@@ -36,39 +92,56 @@ impl StudioDriver {
         let address: SocketAddr = address.parse().map_err(|e| format!("Studio address must be IP:port: {e}"))?;
         if !address.ip().is_loopback() { return Err("Studio attachment requires a loopback address".into()); }
         let stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).map_err(|e| format!("connect Studio: {e}"))?;
-        stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
-        stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
-        let (socket, _) = tungstenite::client(format!("ws://{address}/ui"), stream).map_err(|e| format!("Studio handshake: {e}"))?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stream = StudioStream { stream, deadline };
+        let mut handshake = tungstenite::client(format!("ws://{address}/ui"), stream);
+        let socket = loop {
+            if transport_wait(deadline, Instant::now()).is_none() { return Err("Studio upgrade deadline expired".into()); }
+            match handshake {
+                Ok((socket, _)) => break socket,
+                Err(HandshakeError::Interrupted(partial)) => handshake = partial.handshake(),
+                Err(HandshakeError::Failure(error)) => return Err(format!("Studio upgrade: {error}")),
+            }
+        };
         let mut driver = Self { socket, client_id: ClientId(0), counter: 1, build_id: QueryId(build_id), diagnostics: Diagnostics::new(64 * 1024), last_snapshot: Vec::new(), windowed: false };
-        match driver.receive(Instant::now() + Duration::from_secs(5))? {
+        match driver.receive(Instant::now() + Duration::from_secs(5), "Hello")? {
             HubToClient::Hello { client_id } => driver.client_id = client_id,
             _ => return Err("Studio did not start with Hello".into()),
         }
         Ok(driver)
     }
 
-    fn receive(&mut self, deadline: Instant) -> Result<HubToClient, String> {
+    fn receive(&mut self, deadline: Instant, phase: &str) -> Result<HubToClient, String> {
+        self.socket.get_mut().deadline = deadline;
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() { return Err("Studio response deadline expired".into()); }
-            self.socket.get_mut().set_read_timeout(Some(remaining)).map_err(|e| e.to_string())?;
-            let message = match self.socket.read().map_err(|e| format!("Studio read: {e}"))? {
-                Message::Binary(bytes) => HubToClient::deserialize_bin(&bytes).map_err(|e| format!("invalid Studio binary response: {e:?}"))?,
-                Message::Text(text) => HubToClient::deserialize_json(&text).map_err(|e| format!("invalid Studio JSON response: {e:?}"))?,
-                Message::Ping(_) | Message::Pong(_) => continue,
-                Message::Close(_) => return Err("Studio connection closed".into()),
-                _ => return Err("unsupported Studio websocket frame".into()),
+            if transport_wait(deadline, Instant::now()).is_none() { return Err(format!("Studio {phase} deadline expired")); }
+            let response = match self.socket.read() {
+                Ok(response) => response,
+                Err(tungstenite::Error::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                Err(error) => return Err(format!("Studio {phase} read: {error}")),
             };
-            if let HubToClient::Error { message } = message { return Err(format!("Studio: {message}")); }
+            let message = match response {
+                Message::Binary(bytes) => HubToClient::deserialize_bin(&bytes).map_err(|e| format!("Studio {phase}: invalid binary response: {e:?}"))?,
+                Message::Text(text) => HubToClient::deserialize_json(&text).map_err(|e| format!("Studio {phase}: invalid JSON response: {e:?}"))?,
+                Message::Ping(_) | Message::Pong(_) => continue,
+                Message::Close(_) => return Err(format!("Studio {phase}: connection closed")),
+                _ => return Err(format!("Studio {phase}: unsupported websocket frame")),
+            };
+            if transport_wait(deadline, Instant::now()).is_none() { return Err(format!("Studio {phase} deadline expired")); }
+            if let HubToClient::Error { message } = message { return Err(format!("Studio {phase}: {message}")); }
             return Ok(message);
         }
     }
 
-    fn send(&mut self, msg: ClientToHub) -> Result<QueryId, String> {
+    fn send(&mut self, msg: ClientToHub, deadline: Instant, phase: &str) -> Result<QueryId, String> {
+        if transport_wait(deadline, Instant::now()).is_none() { return Err(format!("Studio {phase} deadline expired")); }
+        self.socket.get_mut().deadline = deadline;
         let query_id = QueryId::new(self.client_id, self.counter);
         self.counter += 1;
         let envelope = ClientToHubEnvelope { query_id, msg };
-        self.socket.send(Message::Binary(envelope.serialize_bin().into())).map_err(|e| format!("Studio write: {e}"))?;
+        // A failed write may already have sent bytes. Report uncertainty and
+        // never recreate or resubmit this command on another connection.
+        self.socket.send(Message::Binary(envelope.serialize_bin().into())).map_err(|e| format!("Studio {phase} write: {e}"))?;
         Ok(query_id)
     }
 
@@ -88,9 +161,9 @@ impl StudioDriver {
     }
 
     fn snapshot_until(&mut self, deadline: Instant) -> Result<Vec<WidgetSnapshot>, String> {
-        let query = self.send(ClientToHub::WidgetSnapshot { build_id: self.build_id })?;
+        let query = self.send(ClientToHub::WidgetSnapshot { build_id: self.build_id }, deadline, "command")?;
         loop {
-            match self.receive(deadline)? {
+            match self.receive(deadline, "command")? {
                 HubToClient::WidgetSnapshot { query_id, build_id, widgets } if query_id == query && build_id == self.build_id => {
                     let json = strip_trailing_commas(&widgets.serialize_json());
                     let widgets: Vec<WidgetSnapshot> = serde_json::from_str(&json).map_err(|e| format!("invalid widget snapshot: {e}"))?;
@@ -108,7 +181,7 @@ impl StudioDriver {
         // field, reject non-primary windows rather than misdirecting events.
         if window != 0 { return Err("this Studio revision cannot route input to a non-primary window".into()); }
         let msg = StudioToApp::deserialize_json(&msg.to_line()).map_err(|e| format!("incompatible input protocol: {e:?}"))?;
-        self.send(ClientToHub::RunViewInput { build_id: self.build_id, window_id: window, msg_bin: StudioToAppVec(vec![msg]).serialize_bin() })?;
+        self.send(ClientToHub::RunViewInput { build_id: self.build_id, window_id: window, msg_bin: StudioToAppVec(vec![msg]).serialize_bin() }, Instant::now() + Duration::from_secs(5), "command")?;
         Ok(())
     }
 
@@ -148,10 +221,10 @@ impl StudioDriver {
     }
 
     fn capture(&mut self, out: &Path, label: &str) -> Result<PathBuf, String> {
-        let query = self.send(ClientToHub::Screenshot { build_id: self.build_id, kind_id: Some(0) })?;
         let deadline = Instant::now() + Duration::from_secs(25);
+        let query = self.send(ClientToHub::Screenshot { build_id: self.build_id, kind_id: Some(0) }, deadline, "capture")?;
         loop {
-            match self.receive(deadline)? {
+            match self.receive(deadline, "capture")? {
                 HubToClient::Screenshot { query_id, build_id, path, width, height, .. } if query_id == query && build_id == self.build_id => {
                     let bytes = std::fs::read(&path).map_err(|e| format!("read correlated Studio capture: {e}"))?;
                     validate_capture(query.0, &[query_id.0], width, height, &bytes)?;
@@ -303,6 +376,265 @@ pub fn run_cli(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn studio_transport_wait_boundary() {
+        let start = Instant::now();
+        let deadline = start + Duration::from_millis(80);
+        assert_eq!(transport_wait(deadline, start), Some(Duration::from_millis(50)));
+        assert_eq!(transport_wait(deadline, start + Duration::from_millis(79)), Some(Duration::from_millis(1)));
+        assert_eq!(transport_wait(deadline, deadline), None);
+        assert_eq!(transport_wait(deadline, deadline + Duration::from_millis(1)), None);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_studio_transport_wait_never_extends_deadline(budget_ms in 0u64..60_001, elapsed_ms in 0u64..60_001) {
+            let start = Instant::now();
+            let result = transport_wait(start + Duration::from_millis(budget_ms), start + Duration::from_millis(elapsed_ms));
+            if elapsed_ms >= budget_ms {
+                proptest::prop_assert_eq!(result, None);
+            } else {
+                let wait = result.expect("a future deadline has a positive wait");
+                proptest::prop_assert!(!wait.is_zero());
+                proptest::prop_assert!(wait <= Duration::from_millis(50));
+                proptest::prop_assert!(wait <= Duration::from_millis(budget_ms - elapsed_ms));
+            }
+        }
+    }
+
+    #[test]
+    fn studio_transport_slow_command_write_keeps_one_frame() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let stream = transport_test_accept(&listener);
+            let mut socket = tungstenite::accept(stream).unwrap();
+            socket.send(Message::Binary(HubToClient::Hello { client_id: ClientId(3) }.serialize_bin().into())).unwrap();
+            assert!(socket.get_mut().peek(&mut [0]).unwrap() > 0);
+            std::thread::sleep(Duration::from_millis(250));
+            let mut received = Vec::new();
+            while let Ok(Message::Binary(bytes)) = socket.read() {
+                let envelope = ClientToHubEnvelope::deserialize_bin(&bytes).unwrap();
+                let ClientToHub::RunViewInput { msg_bin, .. } = envelope.msg else { panic!("expected input"); };
+                let input = StudioToAppVec::deserialize_bin(&msg_bin).unwrap();
+                let [StudioToApp::TextInput(input)] = input.0.as_slice() else { panic!("expected one text input"); };
+                assert!(input.input.bytes().all(|byte| byte == b'x'));
+                received.push(input.input.len());
+            }
+            received
+        });
+        let mut driver = StudioDriver::connect(&address, 42).unwrap();
+        let length = 8 * 1024 * 1024;
+        let result = driver.input(0, Msg::TextInput { input: "x".repeat(length) });
+        drop(driver);
+        let received = server.join().unwrap();
+        assert!(result.is_ok(), "a temporary write wait within the command budget must preserve the frame: {result:?}");
+        assert_eq!(received, [length], "a partial write must neither truncate nor replay input");
+    }
+
+    fn transport_test_accept(listener: &TcpListener) -> TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+                    stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+                    return stream;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("test Studio did not receive a connection: {error}"),
+            }
+        }
+    }
+
+    // Split the real server's HTTP response without reimplementing its
+    // protocol or accept-key calculation. Only the first three writes delay.
+    #[derive(Debug)]
+    struct FragmentedUpgrade {
+        stream: TcpStream,
+        interval: Duration,
+        started: Instant,
+        writes: u32,
+    }
+
+    impl std::io::Read for FragmentedUpgrade {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            std::io::Read::read(&mut self.stream, bytes)
+        }
+    }
+
+    impl std::io::Write for FragmentedUpgrade {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.writes < 3 {
+                let due = self.started + self.interval * self.writes;
+                std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                self.writes += 1;
+                return std::io::Write::write(&mut self.stream, &bytes[..bytes.len().min(50)]);
+            }
+            std::io::Write::write(&mut self.stream, bytes)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            std::io::Write::flush(&mut self.stream)
+        }
+    }
+
+    fn fragmented_upgrade_probe(interval: Duration) -> (Result<(), String>, Duration) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let stream = transport_test_accept(&listener);
+            let stream = FragmentedUpgrade { stream, interval, started: Instant::now(), writes: 0 };
+            if let Ok(mut socket) = tungstenite::accept(stream) {
+                let _hello = socket.send(Message::Binary(HubToClient::Hello { client_id: ClientId(3) }.serialize_bin().into()));
+            }
+            assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+                "resuming an upgrade must not open a replacement connection");
+        });
+        let started = Instant::now();
+        let result = StudioDriver::connect(&address, 42).map(|_| ());
+        let elapsed = started.elapsed();
+        server.join().unwrap();
+        (result, elapsed)
+    }
+
+    #[test]
+    fn studio_transport_upgrade_progress_cannot_extend_deadline() {
+        let (result, elapsed) = fragmented_upgrade_probe(Duration::from_secs(3));
+        assert!(result.is_err(), "fragment progress must not extend the five-second upgrade budget; accepted after {elapsed:?}");
+        let error = result.unwrap_err();
+        assert!(error.contains("Studio upgrade deadline expired"), "wrong failing phase: {error}");
+        assert!(elapsed < Duration::from_millis(5800), "upgrade exceeded its deadline tolerance: {elapsed:?}");
+    }
+
+    #[test]
+    fn studio_transport_fragmented_upgrade_succeeds_on_original_connection() {
+        let (result, elapsed) = fragmented_upgrade_probe(Duration::from_millis(150));
+        assert!(result.is_ok(), "fragments inside the budget must retain handshake state: {result:?}");
+        assert!(elapsed >= Duration::from_millis(250), "server must exercise delayed fragments");
+        assert!(elapsed < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn studio_transport_hello_timeout_names_phase() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let stream = transport_test_accept(&listener);
+            let mut socket = tungstenite::accept(stream).unwrap();
+            assert!(socket.read().is_err(), "a client waiting for Hello must not submit commands");
+        });
+        let started = Instant::now();
+        let result = StudioDriver::connect(&address, 42).map(|_| ());
+        let elapsed = started.elapsed();
+        server.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(error.contains("Studio Hello deadline expired"), "wrong failing phase: {error}");
+        assert!(elapsed >= Duration::from_millis(4900) && elapsed < Duration::from_secs(6), "unexpected Hello budget: {elapsed:?}");
+    }
+
+    fn silent_response_server(listener: TcpListener, capture: bool) -> usize {
+        let stream = transport_test_accept(&listener);
+        let mut socket = tungstenite::accept(stream).unwrap();
+        socket.send(Message::Binary(HubToClient::Hello { client_id: ClientId(3) }.serialize_bin().into())).unwrap();
+        let mut requests = 0;
+        while let Ok(Message::Binary(bytes)) = socket.read() {
+            let envelope = ClientToHubEnvelope::deserialize_bin(&bytes).unwrap();
+            if capture {
+                assert!(matches!(envelope.msg, ClientToHub::Screenshot { build_id: QueryId(42), kind_id: Some(0) }));
+            } else {
+                assert!(matches!(envelope.msg, ClientToHub::WidgetSnapshot { build_id: QueryId(42) }));
+            }
+            requests += 1;
+        }
+        requests
+    }
+
+    #[test]
+    fn studio_transport_command_timeout_names_phase_without_replay() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || silent_response_server(listener, false));
+        let mut driver = StudioDriver::connect(&address, 42).unwrap();
+        let started = Instant::now();
+        let error = driver.snapshot_until(started + Duration::from_millis(150)).unwrap_err();
+        let elapsed = started.elapsed();
+        drop(driver);
+        let requests = server.join().unwrap();
+        assert_eq!(requests, 1, "a response timeout must never resubmit the snapshot");
+        assert!(error.contains("Studio command deadline expired"), "wrong failing phase: {error}");
+        assert!(elapsed >= Duration::from_millis(140) && elapsed < Duration::from_secs(1), "unexpected command budget: {elapsed:?}");
+    }
+
+    #[test]
+    fn studio_transport_command_fragments_cannot_extend_deadline() {
+        #[derive(Debug)]
+        struct FragmentedResponse { stream: TcpStream, remaining: usize }
+        impl std::io::Read for FragmentedResponse {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                std::io::Read::read(&mut self.stream, bytes)
+            }
+        }
+        impl std::io::Write for FragmentedResponse {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.remaining > 0 {
+                    self.remaining -= 1;
+                    std::thread::sleep(Duration::from_millis(20));
+                    return std::io::Write::write(&mut self.stream, &bytes[..1]);
+                }
+                std::io::Write::write(&mut self.stream, bytes)
+            }
+            fn flush(&mut self) -> std::io::Result<()> { std::io::Write::flush(&mut self.stream) }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let stream = transport_test_accept(&listener);
+            let mut socket = tungstenite::accept(FragmentedResponse { stream, remaining: 0 }).unwrap();
+            socket.send(Message::Binary(HubToClient::Hello { client_id: ClientId(3) }.serialize_bin().into())).unwrap();
+            let Message::Binary(bytes) = socket.read().unwrap() else { panic!("expected snapshot request"); };
+            let envelope = ClientToHubEnvelope::deserialize_bin(&bytes).unwrap();
+            assert!(matches!(envelope.msg, ClientToHub::WidgetSnapshot { build_id: QueryId(42) }));
+            socket.get_mut().remaining = 20;
+            let reply = HubToClient::WidgetSnapshot { query_id: envelope.query_id, build_id: QueryId(42), widgets: vec![] };
+            let _late_reply = socket.send(Message::Binary(reply.serialize_bin().into()));
+        });
+        let mut driver = StudioDriver::connect(&address, 42).unwrap();
+        let started = Instant::now();
+        let result = driver.snapshot_until(started + Duration::from_millis(150));
+        let elapsed = started.elapsed();
+        drop(driver);
+        server.join().unwrap();
+        assert!(result.is_err(), "continuous frame progress must not make a late snapshot successful: {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(300), "an outer receive-loop deadline is insufficient: {elapsed:?}");
+    }
+
+    #[test]
+    fn studio_transport_capture_timeout_names_phase_without_replay() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let directory = std::env::temp_dir().join(format!("ux-studio-transport-capture-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let server = std::thread::spawn(move || silent_response_server(listener, true));
+        let mut driver = StudioDriver::connect(&address, 42).unwrap();
+        let started = Instant::now();
+        let result = driver.capture(&directory, "absent");
+        let elapsed = started.elapsed();
+        drop(driver);
+        let requests = server.join().unwrap();
+        let entries = std::fs::read_dir(&directory).unwrap().count();
+        std::fs::remove_dir(&directory).unwrap();
+        assert_eq!(requests, 1, "a capture timeout must never submit another screenshot");
+        assert_eq!(entries, 0, "a missing frame must not create success evidence");
+        let error = result.unwrap_err();
+        assert!(error.contains("Studio capture deadline expired"), "wrong failing phase: {error}");
+        assert!(elapsed >= Duration::from_millis(24900) && elapsed < Duration::from_secs(27), "unexpected capture budget: {elapsed:?}");
+    }
 
     #[test]
     fn studio_mutations_require_explicit_postconditions() {

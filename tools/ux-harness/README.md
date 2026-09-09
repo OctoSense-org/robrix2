@@ -132,6 +132,15 @@ choose a different output path for every run so stale artifacts cannot mix with
 current evidence. Re-running a step file can repeat its mutations; inspect the
 current app state and prepare only the remaining steps after a failure.
 
+Attachment allows five seconds each for TCP connection, WebSocket upgrade and
+the initial Hello. Upgrade fragments resume on the same connection within one
+fixed deadline. Snapshot responses use their caller's deadline; captures allow
+25 seconds including the request write. Errors identify `Studio upgrade`,
+`Studio Hello`, `Studio command` or `Studio capture`, so failure evidence records
+which phase expired. A failed write can have sent bytes: the harness does not
+reconnect or replay that command. These bounds do not identify the cause of a
+live Studio stall.
+
 `windowed` converts desktop snapshot coordinates using the current Window
 geometry; `embedded` uses desktop coordinates directly. The pinned Studio
 revision ignores the input window index, so non-primary-window input fails
