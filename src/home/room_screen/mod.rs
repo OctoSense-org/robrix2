@@ -58,6 +58,7 @@ use rangemap::RangeSet;
 
 use super::{ContextMenuOpenGesture, event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
+mod action_scope;
 mod bot_admin;
 mod bot_message;
 mod dsl;
@@ -74,6 +75,7 @@ mod thread_lifecycle;
 mod threads_pane;
 mod updates;
 
+use action_scope::room_control_action;
 pub use bot_admin::*;
 use bot_message::*;
 pub use message::*;
@@ -645,7 +647,7 @@ impl Widget for RoomScreen {
                 }
 
                 // Mobile RoomTopBar (header + Chat/Info tabs) actions.
-                match action.as_widget_action().cast::<RoomTopBarAction>() {
+                match room_control_action(action, &[self.room_top_bar(cx, ids!(room_top_bar)).widget_uid()]).cast::<RoomTopBarAction>() {
                     RoomTopBarAction::Back => {
                         cx.widget_action(room_screen_widget_uid, StackNavigationAction::Pop);
                     }
@@ -828,12 +830,9 @@ impl Widget for RoomScreen {
                     }
                 }
 
-                // No `widget_uid_eq` filter here — `OpenThread` is emitted from
-                // a `ThreadsPaneEntry` (a list item), not from the pane itself,
-                // so its widget_uid is the entry's. `LoadMoreRequested` and
-                // `CloseRequested` come from the pane, but `cast_ref` handles
-                // all three regardless of emitter.
-                match action.as_widget_action().cast_ref::<ThreadsPaneAction>() {
+                // Entries emit under their pane's UID so cached room/thread
+                // tabs only handle selections from their own pane.
+                match room_control_action(action, &[threads_sliding_pane.widget_uid()]).cast_ref::<ThreadsPaneAction>() {
                     ThreadsPaneAction::OpenThread(thread_root_event_id) => {
                         log!("RoomScreen: OpenThread received, jumping to {}", thread_root_event_id);
                         threads_sliding_pane.hide(cx);
@@ -1001,7 +1000,7 @@ impl Widget for RoomScreen {
 
             // Floating threads button click → open the threads sliding pane.
             for action in actions {
-                if let ThreadsButtonAction::OpenRequested = action.as_widget_action().cast_ref() {
+                if let ThreadsButtonAction::OpenRequested = room_control_action(action, &[self.view.threads_button(cx, ids!(timeline.threads_button)).widget_uid()]).cast_ref() {
                     self.show_threads_pane(cx);
                     break;
                 }
@@ -1010,7 +1009,7 @@ impl Widget for RoomScreen {
             // Floating info button click → open the room info sliding pane
             // (desktop only — the button is hidden on mobile).
             for action in actions {
-                if let InfoButtonAction::OpenRequested = action.as_widget_action().cast_ref() {
+                if let InfoButtonAction::OpenRequested = room_control_action(action, &[self.view.widget(cx, ids!(timeline.info_button)).widget_uid()]).cast_ref() {
                     self.show_room_info_pane(cx, scope.data.get::<AppState>());
                     break;
                 }

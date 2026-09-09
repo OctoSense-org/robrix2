@@ -320,6 +320,7 @@ pub struct ThreadsPaneEntry {
     #[deref] view: View,
 
     #[rust] thread_root_event_id: Option<OwnedEventId>,
+    #[rust] owner_widget_uid: Option<WidgetUid>,
 }
 
 impl Widget for ThreadsPaneEntry {
@@ -327,7 +328,7 @@ impl Widget for ThreadsPaneEntry {
         // Hit-test the parent area BEFORE propagating to children, so the inner
         // HtmlOrPlaintext (and its TextFlow / HtmlLink children) don't steal
         // FingerDown/Up — mirrors the pattern in rooms_list_entry.rs.
-        if let Some(thread_root_event_id) = self.thread_root_event_id.clone() {
+        if let (Some(thread_root_event_id), Some(owner_widget_uid)) = (self.thread_root_event_id.clone(), self.owner_widget_uid) {
             let area = self.view.area();
             match event.hits(cx, area) {
                 Hit::FingerDown(_) => {
@@ -336,7 +337,7 @@ impl Widget for ThreadsPaneEntry {
                 Hit::FingerUp(fe) if fe.is_over && fe.is_primary_hit() && fe.was_tap() => {
                     log!("ThreadsPaneEntry: tap detected, emitting OpenThread({})", thread_root_event_id);
                     cx.widget_action(
-                        self.widget_uid(),
+                        owner_widget_uid,
                         ThreadsPaneAction::OpenThread(thread_root_event_id),
                     );
                 }
@@ -353,8 +354,9 @@ impl Widget for ThreadsPaneEntry {
 }
 
 impl ThreadsPaneEntry {
-    fn set_entry(&mut self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo) {
+    fn set_entry(&mut self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo, owner_widget_uid: WidgetUid) {
         self.thread_root_event_id = Some(entry.thread_root_event_id.clone());
+        self.owner_widget_uid = Some(owner_widget_uid);
         self.html_or_plaintext(cx, ids!(title)).show_html(cx, &entry.title);
         self.label(cx, ids!(time)).set_text(cx, &entry.time);
         self.label(cx, ids!(subtitle)).set_text(cx, &entry.subtitle);
@@ -363,9 +365,9 @@ impl ThreadsPaneEntry {
 }
 
 impl ThreadsPaneEntryRef {
-    fn set_entry(&self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo) {
+    fn set_entry(&self, cx: &mut Cx, entry: &ThreadsPaneEntryInfo, owner_widget_uid: WidgetUid) {
         let Some(mut inner) = self.borrow_mut() else { return };
-        inner.set_entry(cx, entry);
+        inner.set_entry(cx, entry, owner_widget_uid);
     }
 }
 
@@ -481,6 +483,7 @@ impl Widget for ThreadsSlidingPane {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let pane_widget_uid = self.widget_uid();
         let Some(info) = self.info.as_ref() else {
             self.visible = false;
             return self.view.draw_walk(cx, scope, walk);
@@ -520,7 +523,7 @@ impl Widget for ThreadsSlidingPane {
             while let Some(item_id) = list.next_visible_item(cx) {
                 let Some(entry) = info.entries.get(item_id) else { continue };
                 let item = list.item(cx, item_id, id!(ThreadEntry));
-                item.as_threads_pane_entry().set_entry(cx, entry);
+                item.as_threads_pane_entry().set_entry(cx, entry, pane_widget_uid);
                 item.draw_all(cx, &mut Scope::empty());
             }
         }

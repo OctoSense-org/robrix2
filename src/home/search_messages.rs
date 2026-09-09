@@ -452,18 +452,19 @@ pub struct SearchResultItem {
     /// The matrix event this row represents. `None` until the row is bound
     /// to a [`MessageSearchHit`] via [`SearchResultItem::set_hit`].
     #[rust] event_id: Option<OwnedEventId>,
+    #[rust] owner_widget_uid: Option<WidgetUid>,
 }
 
 impl Widget for SearchResultItem {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         self.view.handle_event(cx, event, scope);
 
-        let Some(event_id) = self.event_id.as_ref() else { return };
+        let (Some(event_id), Some(owner_widget_uid)) = (self.event_id.as_ref(), self.owner_widget_uid) else { return };
         let area = self.view.area();
         if let Hit::FingerUp(fe) = event.hits(cx, area) {
             if fe.is_over && fe.is_primary_hit() && fe.was_tap() {
                 cx.widget_action(
-                    self.widget_uid(),
+                    owner_widget_uid,
                     SearchMessagesAction::JumpToEvent(event_id.clone()),
                 );
             }
@@ -476,8 +477,9 @@ impl Widget for SearchResultItem {
 }
 
 impl SearchResultItem {
-    pub fn set_hit(&mut self, cx: &mut Cx, hit: &MessageSearchHit) {
+    pub fn set_hit(&mut self, cx: &mut Cx, hit: &MessageSearchHit, owner_widget_uid: WidgetUid) {
         self.event_id = Some(hit.event_id.clone());
+        self.owner_widget_uid = Some(owner_widget_uid);
         self.label(cx, ids!(sender_label)).set_text(cx, &hit.sender_display);
         self.label(cx, ids!(ts_label)).set_text(cx, &hit.timestamp_display);
         self.label(cx, ids!(body_label)).set_text(cx, &hit.body_preview);
@@ -689,6 +691,7 @@ impl Widget for SearchMessagesSlidingPane {
 
         self.refresh_status_display(cx);
 
+        let pane_widget_uid = self.widget_uid();
         while let Some(widget) = self.view.draw_walk(cx, scope, walk).step() {
             let portal_list_ref = widget.as_portal_list();
             let Some(mut list) = portal_list_ref.borrow_mut() else { continue };
@@ -698,7 +701,7 @@ impl Widget for SearchMessagesSlidingPane {
                 let Some(hit) = self.hits.get(idx) else { continue };
                 let item = list.item(cx, idx, id!(result_item));
                 if let Some(mut row) = item.as_search_result_item().borrow_mut() {
-                    row.set_hit(cx, hit);
+                    row.set_hit(cx, hit, pane_widget_uid);
                 }
                 item.draw_all(cx, &mut Scope::empty());
             }
