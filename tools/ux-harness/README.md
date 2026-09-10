@@ -141,6 +141,16 @@ which phase expired. A failed write can have sent bytes: the harness does not
 reconnect or replay that command. These bounds do not identify the cause of a
 live Studio stall.
 
+For repeated widget IDs, `path` asks a compatible Studio app to match exact
+named ancestry in its retained widget graph, for example
+`{"path":["info_button","inner_button"]}`. Unnamed intermediary widgets are
+ignored, while every named intermediary must appear in order. The app applies
+effective interaction visibility before returning rectangles. Multiple visible
+paths remain ambiguous. The harness requires the correlated native query and a
+matching snapshot geometry in the same window coordinate space; it never falls
+back to an ID or geometry-only selection when an older app does not support the
+query.
+
 `windowed` converts desktop snapshot coordinates using the current Window
 geometry; `embedded` uses desktop coordinates directly. The pinned Studio
 revision ignores the input window index, so non-primary-window input fails

@@ -9,7 +9,7 @@ use makepad_micro_serde::{DeBin, DeJson, SerBin, SerJson};
 use makepad_studio_protocol::{StudioToApp, StudioToAppVec, hub_protocol::{ClientId, QueryId, ClientToHub, ClientToHubEnvelope, HubToClient}};
 use serde::Deserialize;
 use tungstenite::{Message, WebSocket, HandshakeError};
-use crate::{evidence::{Diagnostics, validate_capture, write_capture}, locator::{Selector, unique_match, input_center}, proto::{Key, Modifiers, Msg, WidgetSnapshot, strip_trailing_commas}};
+use crate::{evidence::{Diagnostics, validate_capture, write_capture}, locator::{Selector, input_center, parse_path_query_rects, unique_match, unique_path_match}, proto::{Key, Modifiers, Msg, WidgetSnapshot, strip_trailing_commas}};
 
 pub struct StudioDriver {
     socket: WebSocket<StudioStream>,
@@ -176,6 +176,19 @@ impl StudioDriver {
         }
     }
 
+    fn path_query_until(&mut self, path: &[String], deadline: Instant) -> Result<Vec<String>, String> {
+        let query_text = format!("path:{}", path.join("/"));
+        let query_id = self.send(ClientToHub::WidgetQuery { build_id: self.build_id, query: query_text.clone() }, deadline, "path query")?;
+        loop {
+            match self.receive(deadline, "path query")? {
+                HubToClient::WidgetQuery { query_id: response_id, build_id, query, rects }
+                    if response_id == query_id && build_id == self.build_id && query == query_text => return Ok(rects),
+                HubToClient::BuildStopped { build_id, exit_code } if build_id == self.build_id => return Err(format!("selected build stopped: {exit_code:?}")),
+                other => self.record_unrelated(other),
+            }
+        }
+    }
+
     fn input(&mut self, window: usize, msg: Msg) -> Result<(), String> {
         // This fork's hub ignores RunViewInput.window_id. Until it routes that
         // field, reject non-primary windows rather than misdirecting events.
@@ -189,8 +202,18 @@ impl StudioDriver {
         if !(1..=60_000).contains(&timeout_ms) { return Err("locator timeout must be 1..60000 ms".into()); }
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         loop {
+            let path_rows = if let Some(path) = &selector.path {
+                Some(parse_path_query_rects(&self.path_query_until(path, deadline)?)?)
+            } else {
+                None
+            };
             let widgets = self.snapshot_until(deadline)?;
-            match unique_match(&widgets, selector) {
+            let result = if let Some(rows) = &path_rows {
+                unique_path_match(&widgets, selector, rows, self.windowed)
+            } else {
+                unique_match(&widgets, selector)
+            };
+            match result {
                 Ok(widget) => return Ok(widget.clone()),
                 Err(error) => {
                     if !error.starts_with("no visible match") || Instant::now() >= deadline { return Err(error); }
@@ -569,6 +592,36 @@ mod tests {
         assert_eq!(requests, 1, "a response timeout must never resubmit the snapshot");
         assert!(error.contains("Studio command deadline expired"), "wrong failing phase: {error}");
         assert!(elapsed >= Duration::from_millis(140) && elapsed < Duration::from_secs(1), "unexpected command budget: {elapsed:?}");
+    }
+
+    #[test]
+    fn studio_path_query_requires_exact_correlation_before_snapshot_join() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let stream = transport_test_accept(&listener);
+            let mut socket = tungstenite::accept(stream).unwrap();
+            socket.send(Message::Binary(HubToClient::Hello { client_id: ClientId(3) }.serialize_bin().into())).unwrap();
+            let Message::Binary(bytes) = socket.read().unwrap() else { panic!("expected path query"); };
+            let envelope = ClientToHubEnvelope::deserialize_bin(&bytes).unwrap();
+            let ClientToHub::WidgetQuery { build_id, query } = &envelope.msg else { panic!("expected native widget query"); };
+            assert_eq!(*build_id, QueryId(42));
+            assert_eq!(query, "path:info_button/inner_button");
+            socket.send(Message::Binary(HubToClient::WidgetQuery {
+                query_id: QueryId(envelope.query_id.0 + 1), build_id: QueryId(42), query: query.clone(), rects: vec!["wrong".into()],
+            }.serialize_bin().into())).unwrap();
+            socket.send(Message::Binary(HubToClient::WidgetQuery {
+                query_id: envelope.query_id, build_id: QueryId(7), query: query.clone(), rects: vec!["wrong".into()],
+            }.serialize_bin().into())).unwrap();
+            socket.send(Message::Binary(HubToClient::WidgetQuery {
+                query_id: envelope.query_id, build_id: QueryId(42), query: query.clone(), rects: vec!["220 inner_button Button 148 72 40 40".into()],
+            }.serialize_bin().into())).unwrap();
+        });
+        let mut driver = StudioDriver::connect(&address, 42).unwrap();
+        let rows = driver.path_query_until(&["info_button".into(), "inner_button".into()], Instant::now() + Duration::from_secs(1)).unwrap();
+        assert_eq!(rows, ["220 inner_button Button 148 72 40 40"]);
+        drop(driver);
+        server.join().unwrap();
     }
 
     #[test]
