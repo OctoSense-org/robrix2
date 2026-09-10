@@ -78,18 +78,21 @@ def cli_json(arguments):
     return result.returncode, document
 
 
-def check_report(code, document):
+def check_report(code, document, regression=False):
     report = document.get('verification', document)
     summary = report['summary']
     counts = {key: summary[key] for key in ('total', 'passed', 'failed', 'skipped', 'uncertain')}
     if any(type(value) is not int or value < 0 for value in counts.values()):
         raise ValueError('invalid verification counts')
-    # Lifecycle returns 1 for manual skips; keep that existing policy explicit.
+    # Preserve the existing nonblocking uncertainty policy for unchanged tasks.
+    # Those results remain UNVERIFIED; active contracts cannot use this policy.
+    permitted_uncertain = regression and counts['uncertain'] > 0
+    unverified = counts['skipped'] > 0 or counts['uncertain'] > 0
     ok = (code in (0, 1) and counts['total'] > 0 and counts['failed'] == 0
-        and counts['uncertain'] == 0
-        and (code == 0 or counts['skipped'] > 0))
+        and (counts['uncertain'] == 0 or permitted_uncertain)
+        and (code == 0 or counts['skipped'] > 0 or permitted_uncertain))
     detail = ', '.join(f'{key}={counts[key]}' for key in ('passed', 'failed', 'skipped', 'uncertain'))
-    if not ok:
+    if not ok or counts['uncertain'] > 0:
         # Slice parsed diagnostics, never a live stdout pipe. Later tasks still run.
         failures = [r for r in report.get('results', []) if r.get('verdict') in ('fail', 'uncertain')]
         for result in failures[:12]:
@@ -97,7 +100,7 @@ def check_report(code, document):
             for step in result.get('step_results', [])[:3]:
                 if step.get('verdict') in ('fail', 'uncertain'):
                     print(f"    {step.get('step_text', '')}: {step.get('reason', '')}"[:1200])
-    return ok, detail
+    return ok, detail, unverified
 
 
 def main():
@@ -131,10 +134,13 @@ def main():
                 arguments += ['--change', change]
         try:
             code, document = cli_json(arguments)
-            ok, detail = check_report(code, document)
+            ok, detail, unverified = check_report(code, document, regression=not changed)
         except (ValueError, KeyError, TypeError) as error:
-            ok, detail = False, str(error)
-        print(f"{'ok' if ok else 'FAIL'} ({mode}): {spec} — {detail}", flush=True)
+            ok, detail, unverified = False, str(error), False
+        status = ('UNVERIFIED' if unverified else 'ok') if ok else 'FAIL'
+        print(f'{status} ({mode}): {spec} — {detail}', flush=True)
+        if ok and unverified:
+            print('  Nonblocking under existing CI policy; skipped/uncertain scenarios are not passes.', flush=True)
         failed |= not ok
     return int(failed)
 

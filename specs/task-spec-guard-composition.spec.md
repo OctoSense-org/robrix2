@@ -13,7 +13,7 @@ Validate a PR containing multiple independently scoped tasks without requiring e
 - For two or more changed task contracts, `partition_changes(changes, documents)` assigns each path to every active contract whose allowed path pattern matches. Every changed file must have an owner; an explicit forbidden path in any active contract fails the composition. No existing task boundary is expanded.
 - Read boundary categories through `agent-spec parse --format json`. Scoped paths still go through the real agent-spec lifecycle boundary verifier and all bound tests. Single-contract verification continues to receive the complete change set; unchanged contracts remain regression checks.
 - Parse lifecycle and verification JSON structurally. Invalid reports fail closed. Print bounded diagnostics without pipelines that terminate the producer early, and continue checking other contracts after a failure.
-- Preserve the existing manual-scenario skip policy and capability/ADR gates. Report skips separately; they never become passing E2E evidence.
+- Preserve the existing manual-scenario skip policy, nonblocking uncertainty for unchanged task regressions, and capability/ADR gates. Report skipped/uncertain scenarios as UNVERIFIED with counts and reasons; they never become passing evidence. Active contract uncertainty remains blocking. Do not remove or replace external test bindings to obtain a passing report.
 - [platform-specific] The Bash CI entry point and its Python 3 integration tests run on the existing macOS/Linux tooling hosts. Cargo workspace tests bind the Python regression suite through the ux-harness package.
 
 ## Boundaries
@@ -81,6 +81,16 @@ Scenario: Single-contract boundaries and manual skips retain their meaning
   When the gate runs the original full-change lifecycle check
   Then the out-of-scope change fails
   And a permitted manual skip is reported separately from passes
+
+Scenario: Unchanged external uncertainty remains unverified
+  Test:
+    Package: ux-harness
+    Filter: spec_guard_composition_regressions
+  Given an unchanged historical contract whose external tests cannot run in this workspace
+  When its verifier returns uncertain scenarios without actual test failures
+  Then the existing regression policy remains nonblocking
+  And the report says UNVERIFIED with the uncertain count instead of claiming a pass
+  And the same uncertainty in an active changed contract fails the gate
 
 ## Out of Scope
 

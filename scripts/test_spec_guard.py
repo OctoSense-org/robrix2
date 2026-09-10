@@ -27,10 +27,11 @@ n = doc.get('failed', 0) + bool(bad)
 results = [{'scenario_name': 'failure ' + str(i), 'verdict': 'fail',
     'step_results': [{'step_text': p, 'verdict': 'fail', 'reason': 'not covered by any allowed boundary'} for p in bad]}
     for i in range(n)]
-summary = {'total': 1+n, 'passed': 1, 'failed': n, 'skipped': doc.get('skipped', 0), 'uncertain': 0}
+summary = {'total': 1+n+doc.get('skipped', 0)+doc.get('uncertain', 0), 'passed': 1,
+    'failed': n, 'skipped': doc.get('skipped', 0), 'uncertain': doc.get('uncertain', 0)}
 report = {'summary': summary, 'results': results}
 print(json.dumps({'verification': report} if a[0] == 'lifecycle' else report, indent=2))
-sys.exit(1 if n or summary['skipped'] else 0)
+sys.exit(1 if n or summary['skipped'] or summary['uncertain'] else 0)
 '''
 
 
@@ -130,6 +131,22 @@ class GuardTests(unittest.TestCase):
         result, _ = self.run_guard()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('skipped=1', result.stdout)
+
+    def test_uncertain_regression_remains_visibly_unverified(self):
+        self.contract('task-a', ['src/a.rs'])
+        old = self.contract('task-old', [], changed=False, uncertain=5)
+        result, _ = self.run_guard()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('UNVERIFIED (regression): ' + old, result.stdout)
+        self.assertIn('uncertain=5', result.stdout)
+        self.assertNotIn('ok (regression): ' + old, result.stdout)
+
+    def test_uncertain_active_contract_fails(self):
+        active = self.contract('task-a', ['src/a.rs'], uncertain=1)
+        result, _ = self.run_guard()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('FAIL (contract): ' + active, result.stdout)
+        self.assertIn('uncertain=1', result.stdout)
 
     def generated(self, count, unowned):
         contracts = [self.contract('task-' + str(i), ['src/shared.rs', 'src/' + str(i) + '.rs']) for i in range(count)]

@@ -17,7 +17,8 @@
 #          then each runs `lifecycle` with its owned paths (boundaries + tests).
 #          Shared files go to every declaring task; explicit denies still fail;
 #        - all other specs are regression checks: run `verify` WITHOUT a change
-#          set (tests only), fail on failed>0. Skips are tolerated.
+#          set (tests only), fail on failed>0. Skips and legacy regression
+#          uncertainty remain nonblocking, explicitly reported as UNVERIFIED.
 #
 # Usage:
 #   scripts/spec-guard.sh [--change-scope staged|worktree] [--base <git-ref>] [--fast]
@@ -106,7 +107,7 @@ done
 # 4a. Changed specs own the change collectively, not by intersecting unrelated
 #     allow-lists. The helper checks total path coverage and explicit denies,
 #     then runs the native lifecycle boundary verifier and tests for each scope.
-#     Manual skips stay visible; failures and uncertain results fail the gate.
+#     Manual skips stay visible; failed/uncertain active contracts fail the gate.
 # 4b. Every other spec is a regression check: verify WITHOUT a change set (no
 #     boundary layer, since foreign files would trivially violate them) and fail
 #     only on `failed > 0`.
