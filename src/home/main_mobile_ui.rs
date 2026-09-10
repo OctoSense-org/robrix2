@@ -59,6 +59,8 @@ impl Widget for MainMobileUI {
                 match action.as_widget_action().cast() {
                     // This is currently handled in the top-level App.
                     RoomsListAction::Selected(_selected_room) => {}
+                    // The top-level App owns the room-bound approval scroll intent.
+                    RoomsListAction::OpenPendingApprovals(_selected_room) => {}
                     // Because the MainMobileUI is drawn based on the AppState only,
                     // all we need to do is update the AppState here.
                     RoomsListAction::InviteAccepted { room_name_id: room_name } => {

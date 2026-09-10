@@ -387,7 +387,7 @@ used_underscore_binding = "allow"
 ## sandbox dirs, mobile-layout detection, ArkUI native inputs), with the legacy
 ## `old/` crate copies removed so the repo resolves as a cargo git dependency.
 [patch."https://github.com/makepad/makepad"]
-## Track the fork's dev branch; Cargo.lock records the exact tested commit.
-## Build Makepad Studio from that same commit for GUI E2E tests.
-makepad-widgets = { git = "https://github.com/ZhangHanDong/makepad", branch = "dev" }
-makepad-code-editor = { git = "https://github.com/ZhangHanDong/makepad", branch = "dev" }
+## Isolated E2E integration of reviewed Dock visibility PR 8.
+## Build Makepad Studio from this same commit for GUI E2E tests.
+makepad-widgets = { git = "https://github.com/ZhangHanDong/makepad", rev = "45e826c2814fccd2c69d558b27775858444c907d" }
+makepad-code-editor = { git = "https://github.com/ZhangHanDong/makepad", rev = "45e826c2814fccd2c69d558b27775858444c907d" }

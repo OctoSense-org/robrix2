@@ -135,6 +135,7 @@ pub(super) fn populate_message_view(
     disabled_action_source_event_ids: &HashSet<OwnedEventId>,
     selected_actions: &HashMap<OwnedEventId, SelectedOctosActionState>,
     expanded_bot_body_event_ids: &HashSet<OwnedEventId>,
+    approval_session: Option<&std::sync::Arc<std::sync::Mutex<crate::approval_state::ApprovalSession>>>,
 ) -> (WidgetRef, ItemDrawnStatus, bool) {
     let mut new_drawn_status = item_drawn_status;
     let ts_millis = event_tl_item.timestamp();
@@ -878,6 +879,9 @@ pub(super) fn populate_message_view(
             action_button_contexts,
             disabled_action_source_event_ids,
             selected_actions,
+            room_screen_widget_uid,
+            timeline_kind.room_id(),
+            approval_session,
         );
     }
 

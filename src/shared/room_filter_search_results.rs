@@ -32,8 +32,9 @@ script_mod! {
         show_bg: true
         draw_bg +: {
             selected: instance(0.0)
-            fn pixel(self) -> vec4 {
-                return mix(#0000, (RBX_BG_SELECTED), self.selected)
+            color_selected: instance(RBX_BG_SELECTED)
+            pixel: fn() {
+                return mix(#0000, self.color_selected, self.selected)
             }
         }
         animator: Animator {
@@ -342,11 +343,12 @@ impl Widget for RoomFilterSearchResultsList {
                 // Both states are written every frame, never only the selected
                 // one: these rows are reused by index, so a row left `on` would
                 // stay highlighted after the selection moved elsewhere.
-                let item_view = item.as_view();
-                if index == self.selected_index {
-                    item_view.animator_cut(cx, ids!(highlight.on));
-                } else {
-                    item_view.animator_cut(cx, ids!(highlight.off));
+                if let Some(mut result_item) = item.borrow_mut::<RoomFilterSearchResultItem>() {
+                    if index == self.selected_index {
+                        result_item.view.animator_cut(cx, ids!(highlight.on));
+                    } else {
+                        result_item.view.animator_cut(cx, ids!(highlight.off));
+                    }
                 }
                 let mut scope = Scope::with_props(target);
                 item.draw_all(cx, &mut scope);

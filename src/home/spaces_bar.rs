@@ -338,7 +338,7 @@ script_mod! {
         spacing: 0.0
 
         auto_tail: false, 
-        max_pull_down: 0.0,
+        bounce_at_start: false,
         scroll_bar: ScrollBar {  // hide the scroll bar
             bar_size: 0.0,
             min_handle_size: 0.0

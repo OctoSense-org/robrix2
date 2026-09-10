@@ -123,7 +123,7 @@ script_mod! {
                 text: ""
             }
 
-            pending_badge := RoundedView {
+            approval_state_badge := RoundedView {
                 width: Fit
                 height: Fit
                 padding: Inset{left: 8.0, right: 8.0, top: 4.0, bottom: 4.0}
@@ -132,7 +132,7 @@ script_mod! {
                     color: (RBX_BG_SURFACE)
                     border_radius: (RBX_RADIUS_PILL)
                 }
-                pending_label := Label {
+                approval_state_label := Label {
                     width: Fit
                     height: Fit
                     draw_text +: {
@@ -155,11 +155,22 @@ script_mod! {
             text: ""
         }
 
+        approval_task_result_unknown_label := Label {
+            width: Fill
+            height: Fit
+            flow: Flow.Right{wrap: true}
+            draw_text +: {
+                text_style: (RBX_TEXT_BODY)
+                color: (RBX_FG_SECONDARY)
+            }
+            text: ""
+        }
+
         approval_action_button_row := View {
             visible: false
             width: Fill
             height: Fit
-            flow: Flow.Right{wrap: true}
+            flow: Down
             spacing: 8.0
 
             // Approval decision buttons are built dynamically in this

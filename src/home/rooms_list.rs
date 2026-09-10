@@ -276,6 +276,9 @@ fn set_room_id_displayed(
 pub enum RoomsListAction {
     /// A new room or space was selected.
     Selected(SelectedRoom),
+    /// Open the resolved private approval room and consume a room-bound,
+    /// one-shot request to show its latest timeline item.
+    OpenPendingApprovals(SelectedRoom),
     /// A new room was joined from an accepted invite,
     /// meaning that the existing `InviteScreen` should be converted
     /// to a `RoomScreen` to display the now-joined room.
@@ -2285,6 +2288,16 @@ impl Widget for RoomsList {
 }
 
 impl RoomsListRef {
+    /// Joined and loaded rooms only; invited rooms cannot be approval destinations.
+    pub(crate) fn joined_room_ids(&self) -> std::collections::BTreeSet<String> {
+        self.borrow().map(|inner| inner.all_joined_rooms.keys().map(ToString::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn joined_room_name(&self, room_id: &OwnedRoomId) -> Option<RoomNameId> {
+        self.borrow()?.all_joined_rooms.get(room_id).map(|room| room.room_name_id.clone())
+    }
+
     /// See [`RoomsList::all_rooms_loaded()`].
     pub fn all_rooms_loaded(&self) -> bool {
         let Some(inner) = self.borrow() else { return false; };

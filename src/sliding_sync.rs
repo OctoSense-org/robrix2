@@ -1,4 +1,7 @@
 use anyhow::{anyhow, bail, Result};
+// Opaque identity carried by the public request/result enums. The model itself
+// remains private, and callers cannot construct a claim outside its validation.
+pub use crate::approval_state::ApprovalClaimKey;
 use bitflags::bitflags;
 use clap::Parser;
 use eyeball::Subscriber;
@@ -1759,6 +1762,15 @@ pub enum MatrixRequest {
         target_user_id: OwnedUserId,
         explicit_room: bool,
         source_event_id: OwnedEventId,
+        approval_claim: Option<crate::approval_state::ApprovalClaimKey>,
+        transaction_id: Option<OwnedTransactionId>,
+    },
+    /// Authenticated discovery of private approval-room markers; never joins rooms.
+    DiscoverApprovalRoomMarkers {
+        account_mxid: OwnedUserId,
+        generation: u64,
+        rooms: Vec<(OwnedRoomId, u64)>,
+        enqueued_at: std::time::Instant,
     },
     /// Send an `m.sticker` event to the given room.
     SendSticker {
@@ -2897,6 +2909,483 @@ pub struct RegisterAccount {
 }
 
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ApprovalSendContext {
+    account: String,
+    device: String,
+    homeserver: String,
+    room: String,
+    joined: bool,
+}
+
+impl ApprovalSendContext {
+    fn from_client(client: &Client, room_id: &RoomId) -> Option<Self> {
+        Some(Self {
+            account: client.user_id()?.to_string(),
+            device: client.device_id()?.to_string(),
+            homeserver: client.homeserver().to_string(),
+            room: room_id.to_string(),
+            joined: client.get_room(room_id).is_some_and(|room| room.state() == RoomState::Joined),
+        })
+    }
+}
+
+fn approval_send_context_matches(
+    claim: &ApprovalClaimKey,
+    captured: &ApprovalSendContext,
+    current: &ApprovalSendContext,
+    transitioning: bool,
+) -> bool {
+    !transitioning && captured == current && current.joined
+        && claim.account_mxid == current.account
+        && claim.approval_room_id == current.room
+}
+
+fn native_approval_send_is_current(room: &Room, claim: &ApprovalClaimKey) -> bool {
+    let Some(client) = get_client() else { return false };
+    let Some(current) = ApprovalSendContext::from_client(&client, room.room_id()) else { return false };
+    let Some(captured) = ApprovalSendContext::from_client(&room.client(), room.room_id()) else { return false };
+    approval_send_context_matches(
+        claim, &captured, &current,
+        is_logout_in_progress() || ACCOUNT_SWITCH_IN_FLIGHT.load(Ordering::Acquire),
+    )
+}
+
+// Shared across batches and replacement account workers. A worker-local
+// semaphore would leave detached requests from the previous account uncounted.
+fn approval_discovery_permits() -> &'static Semaphore {
+    static PERMITS: Semaphore = Semaphore::const_new(crate::approval_discovery::DISCOVERY_CONCURRENCY);
+    &PERMITS
+}
+
+async fn run_bounded_approval_discovery<F: Future>(
+    permits: &Semaphore,
+    deadline: std::time::Instant,
+    request: F,
+) -> Option<F::Output> {
+    if std::time::Instant::now() >= deadline { return None; }
+    tokio::time::timeout_at(deadline.into(), async {
+        let _permit = permits.acquire().await.ok()?;
+        // A ready permit/future must not win over an already elapsed deadline.
+        if std::time::Instant::now() >= deadline { return None; }
+        Some(request.await)
+    }).await.ok().flatten()
+}
+
+#[derive(Debug)]
+struct ApprovalMarkerSelection {
+    observed_v2: bool,
+    marker: Result<Option<serde_json::Value>, ()>,
+}
+
+struct ApprovalMarkerEnvelope<'a> {
+    event_type: std::borrow::Cow<'a, str>,
+    state_key: std::borrow::Cow<'a, str>,
+    has_single_content: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for ApprovalMarkerEnvelope<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ApprovalMarkerEnvelope<'de>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a Matrix state event envelope")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut event_type = None;
+                let mut state_key = None;
+                let mut content_count = 0_usize;
+                while let Some(key) = map.next_key::<std::borrow::Cow<'de, str>>()? {
+                    match key.as_ref() {
+                        "type" if event_type.is_none() => {
+                            event_type = Some(map.next_value()?);
+                        }
+                        "state_key" if state_key.is_none() => {
+                            state_key = Some(map.next_value()?);
+                        }
+                        "content" => {
+                            let _: &serde_json::value::RawValue = map.next_value()?;
+                            content_count = content_count.saturating_add(1);
+                        }
+                        _ => {
+                            let _: &serde_json::value::RawValue = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(ApprovalMarkerEnvelope {
+                    event_type: event_type.ok_or_else(|| serde::de::Error::missing_field("type"))?,
+                    state_key: state_key.ok_or_else(|| serde::de::Error::missing_field("state_key"))?,
+                    has_single_content: content_count == 1,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+fn select_approval_marker_state(
+    events: Vec<(String, String, usize, serde_json::Value)>,
+) -> ApprovalMarkerSelection {
+    const V1: &str = "com.agentchat.approval.room.v1";
+    const V2: &str = "com.agentchat.approval.room.v2";
+    const MAX_EVENT_BYTES: usize = 65_536;
+
+    let mut v1 = Vec::new();
+    let mut v2 = Vec::new();
+    for (event_type, state_key, bytes, event) in events {
+        if !state_key.is_empty() {
+            continue;
+        }
+        match event_type.as_str() {
+            V1 => v1.push((bytes, event)),
+            V2 => v2.push((bytes, event)),
+            _ => {}
+        }
+    }
+    let observed_v2 = !v2.is_empty();
+    let selected = if observed_v2 { v2 } else { v1 };
+    let marker = match selected.as_slice() {
+        [] => Ok(None),
+        [(bytes, event)] if *bytes <= MAX_EVENT_BYTES => Ok(Some(event.clone())),
+        _ => Err(()),
+    };
+    ApprovalMarkerSelection {
+        observed_v2,
+        marker,
+    }
+}
+
+fn select_approval_marker_raw_state<'a, T: 'a>(
+    events: impl IntoIterator<Item = &'a Raw<T>>,
+) -> ApprovalMarkerSelection {
+    const V1: &str = "com.agentchat.approval.room.v1";
+    const V2: &str = "com.agentchat.approval.room.v2";
+
+    let mut candidates = Vec::new();
+    let mut invalid = false;
+    for raw in events {
+        let raw_json = raw.json().get();
+        let envelope = match serde_json::from_str::<ApprovalMarkerEnvelope<'_>>(raw_json) {
+            Ok(envelope) => envelope,
+            Err(_) => {
+                invalid = true;
+                continue;
+            }
+        };
+        let event_type = envelope.event_type;
+        if !matches!(event_type.as_ref(), V1 | V2) {
+            continue;
+        }
+        let state_key = envelope.state_key;
+        let event = match raw_json.len() <= 65_536 && envelope.has_single_content {
+            true => match serde_json::from_str::<serde_json::Value>(raw_json) {
+                Ok(event) => event,
+                Err(_) => {
+                    invalid = true;
+                    serde_json::Value::Null
+                }
+            },
+            false => {
+                invalid = true;
+                serde_json::Value::Null
+            }
+        };
+        candidates.push((event_type.into_owned(), state_key.into_owned(), raw_json.len(), event));
+    }
+    let mut selected = select_approval_marker_state(candidates);
+    if invalid {
+        selected.marker = Err(());
+    }
+    selected
+}
+
+#[cfg(test)]
+mod approval_discovery_worker_tests {
+    use super::{
+        select_approval_marker_raw_state,
+        select_approval_marker_state,
+        run_bounded_approval_discovery,
+    };
+    use ruma::serde::Raw;
+    use serde_json::{Value, json};
+    use std::{future::{Future, pending}, sync::atomic::{AtomicUsize, Ordering}, task::{Context, Waker}, time::{Duration, Instant}};
+    use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn approval_discovery_overlapping_batches_share_permits_and_cancel_cleanly() {
+        let permits = Semaphore::new(2);
+        let started = AtomicUsize::new(0);
+        let request = || async { started.fetch_add(1, Ordering::SeqCst); pending::<()>().await };
+        let deadline = Instant::now() + Duration::from_secs(25);
+        let mut first = Box::pin(run_bounded_approval_discovery(&permits, deadline, request()));
+        let mut second = Box::pin(run_bounded_approval_discovery(&permits, deadline, request()));
+        let mut replacement = Box::pin(run_bounded_approval_discovery(&permits, deadline, request()));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        assert!(replacement.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(started.load(Ordering::SeqCst), 2, "a new batch must not bypass active requests");
+        assert_eq!(permits.available_permits(), 0);
+        drop(first);
+        assert!(replacement.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(started.load(Ordering::SeqCst), 3, "cancellation releases exactly one request slot");
+        assert_eq!(permits.available_permits(), 0);
+        drop(second);
+        drop(replacement);
+        assert_eq!(permits.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn approval_discovery_expired_channel_work_never_starts() {
+        let permits = Semaphore::new(2);
+        let started = AtomicUsize::new(0);
+        let result = run_bounded_approval_discovery(&permits, Instant::now(), async {
+            started.fetch_add(1, Ordering::SeqCst);
+        }).await;
+        assert!(result.is_none());
+        assert_eq!(started.load(Ordering::SeqCst), 0);
+        assert_eq!(permits.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn approval_discovery_deadline_includes_permit_wait() {
+        let permits = Semaphore::new(0);
+        let started = AtomicUsize::new(0);
+        let result = run_bounded_approval_discovery(&permits, Instant::now() + Duration::from_millis(1), async {
+            started.fetch_add(1, Ordering::SeqCst);
+        }).await;
+        assert!(result.is_none());
+        assert_eq!(started.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn approval_discovery_deadline_cancels_fetch_and_releases_permit() {
+        let permits = Semaphore::new(2);
+        let started = AtomicUsize::new(0);
+        let result = run_bounded_approval_discovery(&permits, Instant::now() + Duration::from_secs(1), async {
+            started.fetch_add(1, Ordering::SeqCst);
+            pending::<()>().await
+        }).await;
+        assert!(result.is_none());
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(permits.available_permits(), 2);
+    }
+
+    #[test]
+    fn approval_discovery_selects_v2_without_v1_fallback() {
+        let v1 = json!({
+            "type": "com.agentchat.approval.room.v1",
+            "state_key": "",
+            "event_id": "$v1",
+            "content": {"version": 1}
+        });
+        let malformed_v2 = json!({
+            "type": "com.agentchat.approval.room.v2",
+            "state_key": "",
+            "event_id": "$v2",
+            "content": {"version": "invalid"}
+        });
+        let selected = select_approval_marker_state(vec![
+            ("com.agentchat.approval.room.v1".into(), "".into(), 100, v1),
+            ("com.agentchat.approval.room.v2".into(), "".into(), 100, malformed_v2.clone()),
+        ]);
+        assert!(selected.observed_v2);
+        assert_eq!(selected.marker.unwrap(), Some(malformed_v2));
+
+        let duplicate = select_approval_marker_state(vec![
+            ("com.agentchat.approval.room.v1".into(), "".into(), 100, json!({})),
+            ("com.agentchat.approval.room.v2".into(), "".into(), 100, json!({"event_id":"$a"})),
+            ("com.agentchat.approval.room.v2".into(), "".into(), 100, json!({"event_id":"$b"})),
+        ]);
+        assert!(duplicate.observed_v2);
+        assert!(duplicate.marker.is_err());
+
+        let oversized = select_approval_marker_state(vec![(
+            "com.agentchat.approval.room.v2".into(),
+            "".into(),
+            65_537,
+            json!({"event_id":"$large"}),
+        )]);
+        assert!(oversized.observed_v2);
+        assert!(oversized.marker.is_err());
+
+        let v1_only = json!({
+            "type": "com.agentchat.approval.room.v1",
+            "state_key": "",
+            "event_id": "$legacy",
+            "content": {"version": 1}
+        });
+        let selected_v1 = select_approval_marker_state(vec![(
+            "com.agentchat.approval.room.v1".into(),
+            "".into(),
+            100,
+            v1_only.clone(),
+        )]);
+        assert!(!selected_v1.observed_v2);
+        assert_eq!(selected_v1.marker.unwrap(), Some(v1_only));
+    }
+
+    #[test]
+    fn approval_discovery_raw_error_retains_observed_v2_floor() {
+        let v2 = json!({
+            "type": "com.agentchat.approval.room.v2",
+            "state_key": "",
+            "event_id": "$v2",
+            "sender": "@publisher:test",
+            "content": {"version": 2}
+        })
+        .to_string();
+        let malformed_sibling = json!({
+            "type": 17,
+            "state_key": "",
+            "content": {}
+        })
+        .to_string();
+
+        let v2 = Raw::<Value>::new(&serde_json::from_str::<Value>(&v2).unwrap()).unwrap();
+        let malformed_sibling = Raw::<Value>::new(
+            &serde_json::from_str::<Value>(&malformed_sibling).unwrap(),
+        )
+        .unwrap();
+
+        let selected = select_approval_marker_raw_state([&v2, &malformed_sibling]);
+        assert!(selected.observed_v2);
+        assert!(selected.marker.is_err());
+    }
+
+    #[test]
+    fn approval_discovery_deep_v2_content_retains_protocol_floor_in_both_orders() {
+        let deep_content = format!("{}0{}", "[".repeat(140), "]".repeat(140));
+        let v2_json = format!(
+            r#"{{"type":"com.agentchat.approval.room.v2","state_key":"","content":{deep_content}}}"#,
+        );
+        let v1_json = r#"{"type":"com.agentchat.approval.room.v1","state_key":"","content":{"version":1}}"#;
+        let v2 = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(v2_json).unwrap(),
+        );
+        let v1 = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(v1_json.into()).unwrap(),
+        );
+
+        for events in [[&v2, &v1], [&v1, &v2]] {
+            let selected = select_approval_marker_raw_state(events);
+            assert!(selected.observed_v2);
+            assert!(selected.marker.is_err());
+        }
+    }
+
+    #[test]
+    fn approval_discovery_missing_or_oversized_v2_retains_floor_without_fallback() {
+        let missing = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(
+                r#"{"type":"com.agentchat.approval.room.v2","state_key":""}"#.into(),
+            )
+            .unwrap(),
+        );
+        let oversized = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(format!(
+                r#"{{"type":"com.agentchat.approval.room.v2","state_key":"","content":{{"padding":"{}"}}}}"#,
+                "x".repeat(65_536),
+            ))
+            .unwrap(),
+        );
+        let v1 = Raw::<Value>::new(&json!({
+            "type": "com.agentchat.approval.room.v1",
+            "state_key": "",
+            "content": {"version": 1},
+        }))
+        .unwrap();
+
+        for invalid_v2 in [&missing, &oversized] {
+            let selected = select_approval_marker_raw_state([invalid_v2, &v1]);
+            assert!(selected.observed_v2);
+            assert!(selected.marker.is_err());
+        }
+
+        let escaped_type = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(
+                r#"{"type":"com.agentchat.approval.room.\u00762","state_key":"","content":{}}"#.into(),
+            )
+            .unwrap(),
+        );
+        let duplicate_content = Raw::<Value>::from_json(
+            serde_json::value::RawValue::from_string(
+                r#"{"type":"com.agentchat.approval.room.v2","state_key":"","content":{},"content":{}}"#.into(),
+            )
+            .unwrap(),
+        );
+        for v2 in [&escaped_type, &duplicate_content] {
+            assert!(select_approval_marker_raw_state([v2, &v1]).observed_v2);
+        }
+    }
+}
+
+#[cfg(test)]
+mod approval_send_context_tests {
+    use super::{ApprovalClaimKey, ApprovalSendContext, approval_send_context_matches};
+
+    fn fixture() -> (ApprovalClaimKey, ApprovalSendContext) {
+        (
+            ApprovalClaimKey {
+                account_mxid: "@owner:test".into(), approval_room_id: "!private:test".into(),
+                request_id: "approval_0123456789abcdef0123456789abcdef".into(),
+                input_digest: "a".repeat(64),
+            },
+            ApprovalSendContext {
+                account: "@owner:test".into(), device: "DEVICE".into(),
+                homeserver: "https://test/".into(), room: "!private:test".into(), joined: true,
+            },
+        )
+    }
+
+    #[test]
+    fn approval_send_rechecks_account_after_preparation() {
+        let (claim, captured) = fixture();
+        assert!(approval_send_context_matches(&claim, &captured, &captured, false));
+        let mut current = captured.clone();
+        current.account = "@other:test".into();
+        assert!(!approval_send_context_matches(&claim, &captured, &current, false));
+        // Even a new timeline must not send a claim belonging to the old owner.
+        assert!(!approval_send_context_matches(&claim, &current, &current, false));
+    }
+
+    #[test]
+    fn approval_send_rejects_changed_device_server_room_or_membership() {
+        let (claim, captured) = fixture();
+        let mut changed = captured.clone();
+        changed.device = "OTHER".into();
+        assert!(!approval_send_context_matches(&claim, &captured, &changed, false));
+        changed = captured.clone();
+        changed.homeserver = "https://other/".into();
+        assert!(!approval_send_context_matches(&claim, &captured, &changed, false));
+        changed = captured.clone();
+        changed.room = "!other:test".into();
+        assert!(!approval_send_context_matches(&claim, &changed, &changed, false));
+        changed = captured.clone();
+        changed.joined = false;
+        assert!(!approval_send_context_matches(&claim, &changed, &changed, false));
+    }
+
+    #[test]
+    fn approval_send_waiting_for_account_teardown_cannot_begin() {
+        let (claim, captured) = fixture();
+        // The UI reserves account switching before CLIENT is replaced.
+        assert!(!approval_send_context_matches(&claim, &captured, &captured, true));
+        assert!(approval_send_context_matches(&claim, &captured, &captured, false));
+    }
+}
+
 /// The entry point for the worker task that runs Matrix-related operations.
 ///
 /// All this task does is wait for [`MatrixRequests`] from the main UI thread
@@ -2912,6 +3401,7 @@ async fn matrix_worker_task(
     let mut subscribers_pinned_events: HashMap<OwnedRoomId, JoinHandle<()>> = HashMap::new();
     // In-flight attachment-download tasks keyed by MXC URI, for cancel support.
     let download_tasks: Arc<Mutex<HashMap<OwnedMxcUri, futures_util::future::AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
+    let approval_discovery_permits = approval_discovery_permits();
 
     while let Some(request) = request_receiver.recv().await {
         match request {
@@ -6037,14 +6527,29 @@ async fn matrix_worker_task(
                 target_user_id,
                 explicit_room,
                 source_event_id,
+                approval_claim,
+                transaction_id,
             } => {
                 let Some((timeline, _sender)) = get_timeline_and_sender(&timeline_kind) else {
                     log!("BUG: {timeline_kind} not found for send action response request");
+                    Cx::post_action(ActionResponseResultAction::Failed {
+                        room_id: timeline_kind.room_id().clone(), source_event_id,
+                        error: "The room timeline is unavailable".into(), approval_claim,
+                        outcome_unknown: false,
+                    });
                     continue;
                 };
                 let room_id = timeline_kind.room_id().to_owned();
 
                 let _send_action_response_task = Handle::current().spawn(async move {
+                    if approval_claim.as_ref().is_some_and(|claim| !native_approval_send_is_current(timeline.room(), claim)) {
+                        Cx::post_action(ActionResponseResultAction::Failed {
+                            room_id, source_event_id, approval_claim,
+                            error: "The approval account or room is no longer active".into(),
+                            outcome_unknown: false,
+                        });
+                        return;
+                    }
                     if should_ensure_action_response_target_joined(&content) {
                         if let Err(error) = ensure_target_user_joined_room(
                             timeline.room(),
@@ -6057,6 +6562,8 @@ async fn matrix_worker_task(
                                 room_id,
                                 source_event_id,
                                 error: error.to_string(),
+                                approval_claim,
+                                outcome_unknown: false,
                             });
                             return;
                         }
@@ -6077,6 +6584,8 @@ async fn matrix_worker_task(
                                 room_id,
                                 source_event_id,
                                 error: error.to_string(),
+                                approval_claim,
+                                outcome_unknown: false,
                             });
                             return;
                         }
@@ -6089,22 +6598,39 @@ async fn matrix_worker_task(
                                 room_id,
                                 source_event_id,
                                 error: error.to_string(),
+                                approval_claim,
+                                outcome_unknown: false,
                             });
                             return;
                         }
                     }
 
+                    // Preparation awaits Matrix I/O. A switch or leave during
+                    // that interval must not start a verdict with the old client.
+                    if approval_claim.as_ref().is_some_and(|claim| !native_approval_send_is_current(timeline.room(), claim)) {
+                        Cx::post_action(ActionResponseResultAction::Failed {
+                            room_id, source_event_id, approval_claim,
+                            error: "The approval account or room changed during preparation".into(),
+                            outcome_unknown: false,
+                        });
+                        return;
+                    }
                     let raw_content = prepare_action_response_content(
                         content,
                         target_user_id.as_ref(),
                         explicit_room,
                     );
-                    match timeline.room().send_raw("m.room.message", raw_content).await {
+                    let mut send = timeline.room().send_raw("m.room.message", raw_content);
+                    if let Some(transaction_id) = transaction_id.as_deref() {
+                        send = send.with_transaction_id(transaction_id);
+                    }
+                    match send.await {
                         Ok(_response) => {
                             log!("Sent action response message to {timeline_kind}.");
                             Cx::post_action(ActionResponseResultAction::Sent {
                                 room_id,
                                 source_event_id,
+                                approval_claim,
                             });
                         }
                         Err(error) => {
@@ -6113,9 +6639,83 @@ async fn matrix_worker_task(
                                 room_id,
                                 source_event_id,
                                 error: error.to_string(),
+                                approval_claim,
+                                outcome_unknown: true,
                             });
                         }
                     }
+                });
+            }
+
+            MatrixRequest::DiscoverApprovalRoomMarkers { account_mxid, generation, rooms, enqueued_at } => {
+                use crate::approval_discovery::{ApprovalDiscoveryRequest, ApprovalDiscoveryResult,
+                    DiscoveryOutcome, DISCOVERY_BATCH_SIZE, DISCOVERY_CONCURRENCY, DISCOVERY_TIMEOUT_MS};
+                let client = get_client();
+                // Includes time spent in the MatrixRequest channel, then waiting
+                // for a shared permit. App's generation/nonce guard remains final.
+                let deadline = enqueued_at + Duration::from_millis(DISCOVERY_TIMEOUT_MS * 2 + 5_000);
+                let _approval_discovery_task = Handle::current().spawn(async move {
+                    stream::iter(rooms.into_iter().take(DISCOVERY_BATCH_SIZE))
+                        .for_each_concurrent(DISCOVERY_CONCURRENCY, |(room_id, nonce)| {
+                            let client = client.clone();
+                            let account = account_mxid.clone();
+                            async move {
+                                let request = ApprovalDiscoveryRequest {
+                                    account: account.to_string(), room_id: room_id.to_string(), generation, nonce,
+                                };
+                                let fetched = run_bounded_approval_discovery(approval_discovery_permits, deadline, async {
+                                    tokio::time::timeout(Duration::from_millis(DISCOVERY_TIMEOUT_MS), async {
+                                        let client = client.ok_or_else(|| anyhow!("signed-in client unavailable"))?;
+                                        let current_context_matches = || get_client().is_some_and(|current| {
+                                            current.user_id() == Some(account.as_ref())
+                                                && client.user_id() == current.user_id()
+                                                && client.device_id() == current.device_id()
+                                                && client.homeserver() == current.homeserver()
+                                                && current.get_room(&room_id).is_some_and(|room| room.state() == RoomState::Joined)
+                                        });
+                                        if !current_context_matches() { bail!("account or room changed"); }
+                                        let room = client.get_room(&room_id).ok_or_else(|| anyhow!("room unavailable"))?;
+                                        if room.state() != RoomState::Joined { bail!("room not joined"); }
+                                        let response = client.send(ruma::api::client::state::get_state_events::v3::Request::new(room_id.clone()))
+                                            .with_request_config(RequestConfig::default().retry_limit(0)).await?;
+                                        if !current_context_matches() || room.state() != RoomState::Joined {
+                                            bail!("account or room no longer current");
+                                        }
+                                        Ok::<_, anyhow::Error>(
+                                            select_approval_marker_raw_state(
+                                                response.room_state.iter(),
+                                            ),
+                                        )
+                                    }).await
+                                }).await;
+                                let (outcome, observed_v2, marker) = match fetched {
+                                    Some(Ok(Ok(selection))) => match selection.marker {
+                                        Ok(Some(marker)) => (
+                                            DiscoveryOutcome::Present,
+                                            selection.observed_v2,
+                                            Some(marker),
+                                        ),
+                                        Ok(None) => (
+                                            DiscoveryOutcome::Absent,
+                                            selection.observed_v2,
+                                            None,
+                                        ),
+                                        Err(()) => (
+                                            DiscoveryOutcome::Failed,
+                                            selection.observed_v2,
+                                            None,
+                                        ),
+                                    },
+                                    _ => (DiscoveryOutcome::Failed, false, None),
+                                };
+                                Cx::post_action(ApprovalDiscoveryResult {
+                                    request,
+                                    outcome,
+                                    observed_v2,
+                                    marker,
+                                });
+                            }
+                        }).await;
                 });
             }
 

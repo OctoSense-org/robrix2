@@ -1780,7 +1780,7 @@ script_mod! {
                             height: 0
                             flow: Down
                             grab_key_focus: false
-                            max_pull_down: 0.0
+                            bounce_at_start: false
                             auto_tail: false
                             keep_invisible: false
 
@@ -2096,7 +2096,7 @@ script_mod! {
                         height: Fill
                         flow: Down
                         auto_tail: false
-                        max_pull_down: 0.0
+                        bounce_at_start: false
 
                         member_row := View {
                             width: Fill

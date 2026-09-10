@@ -113,6 +113,13 @@ impl RoomScreen {
                 !tl.pending_updates.is_empty(),
             )
         };
+        if self.approval_fold_pending {
+            if let (Some(app_state), Some(tl)) = (app_state, self.tl_state.as_ref()) {
+                fold_approval_events(Some(app_state), tl.kind.room_id(), &tl.items);
+                self.approval_fold_pending = false;
+            }
+        }
+        self.apply_latest_approval_request(cx);
         if !has_pending_updates {
             return;
         }
@@ -145,6 +152,11 @@ impl RoomScreen {
             num_updates += 1;
             match update {
                 TimelineUpdate::FirstUpdate { initial_items } => {
+                    if app_state.is_some() {
+                        fold_approval_events(app_state, tl.kind.room_id(), &initial_items);
+                    } else {
+                        self.approval_fold_pending = true;
+                    }
                     if let Some(app_state) = app_state {
                         let discovered_bot_user_ids =
                             Self::discover_known_bot_user_ids_from_timeline_items(
@@ -198,6 +210,11 @@ impl RoomScreen {
                     is_append,
                     clear_cache,
                 } => {
+                    if app_state.is_none() {
+                        self.approval_fold_pending = true;
+                    } else if fold_approval_events(app_state, tl.kind.room_id(), &new_items) {
+                        tl.content_drawn_since_last_update.clear();
+                    }
                     if let Some(app_state) = app_state {
                         let discovered_bot_user_ids =
                             Self::discover_known_bot_user_ids_from_timeline_items(
@@ -840,5 +857,6 @@ impl RoomScreen {
         if has_more_updates {
             SignalToUI::set_ui_signal();
         }
+        self.apply_latest_approval_request(cx);
     }
 }

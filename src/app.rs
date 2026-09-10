@@ -6,7 +6,7 @@
 use std::{fs::{File, OpenOptions}, io::Write, sync::Mutex};
 use std::{
     cell::RefCell,
-    collections::{hash_map::DefaultHasher, BTreeMap, HashMap},
+    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet, HashMap},
     hash::{Hash, Hasher},
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -40,6 +40,7 @@ use crate::home::sticker_modal::StickerModalWidgetRefExt;
 use crate::sliding_sync::GlobalMessageSearchAction;
 use crate::settings::agent_add_modal::{AddAgentModalAction, AddAgentModalWidgetRefExt};
 use crate::settings::agent_settings::AgentSettingsAction;
+use crate::approval_discovery::ApprovalDiscoverySchedule;
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -549,6 +550,12 @@ pub struct App {
     /// dock also emits when auto-refocusing another tab without touching the
     /// mobile stack.
     #[rust] pending_room_nav_pop: bool,
+    #[rust(Timer::empty())] approval_discovery_timer: Timer,
+    #[rust] approval_discovery: ApprovalDiscoverySchedule,
+    #[rust] approval_account: Option<OwnedUserId>,
+    #[rust] approval_joined_rooms: BTreeSet<String>,
+    #[rust] approval_discovery_suspended: bool,
+    #[rust] pending_approval_navigation: Option<(String, OwnedRoomId)>,
     #[rust(Timer::empty())] room_filter_debounce_timer: Timer,
     #[rust] pending_room_filter_keywords: String,
     /// The last server-side directory search: `(query, results)`.
@@ -854,6 +861,7 @@ impl MatchEvent for App {
 
         log!("App::Startup: starting matrix sdk loop");
         let _tokio_rt_handle = crate::sliding_sync::start_matrix_tokio().unwrap();
+        self.approval_discovery_timer = cx.start_interval(10.0);
 
         #[cfg(feature = "tsp")] {
             log!("App::Startup: initializing TSP (Trust Spanning Protocol) module.");
@@ -869,6 +877,9 @@ impl MatchEvent for App {
     }
 
     fn handle_timer(&mut self, cx: &mut Cx, event: &TimerEvent) {
+        if self.approval_discovery_timer.is_timer(event).is_some() {
+            self.refresh_approval_discovery(cx);
+        }
         if self.room_filter_debounce_timer.is_timer(event).is_some() {
             self.room_filter_debounce_timer = Timer::empty();
             let keywords = std::mem::take(&mut self.pending_room_filter_keywords);
@@ -882,6 +893,7 @@ impl MatchEvent for App {
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         self.sync_app_language(cx);
+        self.handle_approval_results(cx, actions);
 
         // Results for join/leave requests whose modal was dismissed before they
         // came back. Handled here rather than in the modal because a closed
@@ -1164,6 +1176,8 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(LogoutAction::ClearAppState { on_clear_appstate }) =>  {
+                    self.clear_approval_runtime();
+                    self.approval_discovery_suspended = true;
                     // Clear user profile cache, invited_rooms timeline states 
                     clear_all_app_state(cx);
                     // Reset all app state to its default.
@@ -1201,6 +1215,7 @@ impl MatchEvent for App {
             }
 
             if let Some(LoginAction::LoginSuccess) = action.downcast_ref() {
+                self.approval_discovery_suspended = false;
                 log!("Received LoginAction::LoginSuccess, hiding login view.");
                 self.app_state.logged_in = true;
                 self.app_state.adding_account = false;
@@ -1249,6 +1264,8 @@ impl MatchEvent for App {
             // Handle account switch actions
             match action.downcast_ref() {
                 Some(AccountSwitchAction::Starting(user_id)) => {
+                    self.clear_approval_runtime();
+                    self.approval_discovery_suspended = true;
                     log!("Account switch starting to: {}", user_id);
                     // Show a loading toast so the heavy client teardown + rebuild + resync
                     // doesn't look frozen. The popup list is append-only (no dismiss-by-key),
@@ -1272,6 +1289,7 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(AccountSwitchAction::Switched(user_id)) => {
+                    self.approval_discovery_suspended = false;
                     log!("Account switch completed to: {}", user_id);
                     // Release the UI-thread switch guard so the next switch can proceed.
                     end_account_switch_guard();
@@ -1288,6 +1306,7 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(AccountSwitchAction::Failed(error)) => {
+                    self.approval_discovery_suspended = false;
                     log!("Account switch failed: {}", error);
                     // Release the UI-thread switch guard so the user can retry.
                     end_account_switch_guard();
@@ -1638,6 +1657,28 @@ impl MatchEvent for App {
                     self.push_selected_room_view(cx, selected_room);
                     continue;
                 }
+                RoomsListAction::OpenPendingApprovals(selected_room) => {
+                    if !effective_is_desktop(cx)
+                        && self.ui.stack_navigation(cx, ids!(view_stack)).is_transitioning()
+                    {
+                        continue;
+                    }
+                    self.push_selected_room_view(cx, selected_room.clone());
+                    if !effective_is_desktop(cx) {
+                        let room_id = selected_room.room_id().clone();
+                        let view_stack = self.ui.stack_navigation(cx, ids!(view_stack));
+                        if let Some(room_screen_id) = view_stack
+                            .destination_view()
+                            .and_then(Self::room_screen_id_for_view)
+                        {
+                            self.ui
+                                .room_screen(cx, &[room_screen_id])
+                                .show_latest_approval(cx, &room_id);
+                        }
+                    }
+                    self.pending_approval_navigation = None;
+                    continue;
+                }
                 // An invite was accepted; upgrade the selected room from invite to joined.
                 // In Desktop mode, MainDesktopUI also handles this (harmless duplicate).
                 RoomsListAction::InviteAccepted { room_name_id } => {
@@ -1697,6 +1738,14 @@ impl MatchEvent for App {
                 }
             }
 
+            if self.pending_approval_navigation.is_some() && matches!(
+                action.as_widget_action().cast(),
+                StackNavigationTransitionAction::ShowDone
+                    | StackNavigationTransitionAction::HideEnd(_)
+            ) {
+                cx.action(AppStateAction::RetryPendingApprovalNavigation);
+            }
+
             // Handle actions that instruct us to update the top-level app state.
             if let Some(LeaveRoomResultAction::Left { room_id }) = action.downcast_ref() {
                 enqueue_rooms_list_update(RoomsListUpdate::HideRoom { room_id: room_id.clone() });
@@ -1712,6 +1761,23 @@ impl MatchEvent for App {
             }
 
             match action.downcast_ref() {
+                Some(AppStateAction::OpenPendingApprovals { agent, project_room_id }) => {
+                    self.open_pending_approvals(cx, agent, project_room_id);
+                    continue;
+                }
+                Some(AppStateAction::RetryPendingApprovalNavigation) => {
+                    if let Some((agent, project_room)) = self.pending_approval_navigation.take() {
+                        self.open_pending_approvals(cx, &agent, &project_room);
+                    }
+                    continue;
+                }
+                Some(AppStateAction::ApprovalRoomStateChanged { account_mxid, room_id }) => {
+                    if current_user_id().as_ref() == Some(account_mxid) {
+                        self.approval_discovery.refresh_room(account_mxid.as_str(), room_id.as_str());
+                        self.ui.redraw(cx);
+                    }
+                    continue;
+                }
                 Some(AppStateAction::RoomFocused(selected_room)) => {
                     self.app_state.selected_room = Some(selected_room.clone());
                     // Deliberately do NOT clear `pending_room_nav_pop` here:
@@ -1781,6 +1847,7 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(AppStateAction::RestoreAppStateFromPersistentState(app_state)) => {
+                    self.clear_approval_runtime();
                     // Ignore the `logged_in` state that was stored persistently.
                     let logged_in_actual = self.app_state.logged_in;
                     self.app_state = *app_state.clone();
@@ -2708,6 +2775,176 @@ impl AppMain for App {
 }
 
 impl App {
+    fn approval_now_ms() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+            .unwrap_or(0)
+    }
+
+    fn clear_approval_runtime(&mut self) {
+        if let Some(account) = self.approval_account.take() {
+            self.app_state.approval_markers.clear_account(account.as_str());
+            if let Ok(mut session) = self.app_state.approval_session.lock() {
+                session.clear_account(account.as_str());
+            }
+        }
+        self.approval_joined_rooms.clear();
+        // Keep the scheduler's generation/nonce counters across account changes.
+        self.approval_discovery.sync_membership("", &self.approval_joined_rooms);
+        self.pending_approval_navigation = None;
+    }
+
+    fn sync_approval_membership(&mut self, cx: &mut Cx) -> Option<OwnedUserId> {
+        let account = current_user_id().filter(|account| {
+            self.app_state.logged_in && !self.approval_discovery_suspended
+                && get_client().is_some_and(|client| client.user_id() == Some(account.as_ref()))
+        });
+        if self.approval_account != account {
+            self.clear_approval_runtime();
+            self.approval_account = account.clone();
+        }
+        let account = account?;
+        let client = get_client()?;
+        let joined = cx.get_global::<RoomsListRef>().joined_room_ids().into_iter()
+            .filter(|room| RoomId::parse(room).ok().is_some_and(|id| {
+                client.get_room(&id).is_some_and(|room| room.state() == RoomState::Joined)
+            }))
+            .collect::<std::collections::BTreeSet<_>>();
+        for removed in self.approval_joined_rooms.difference(&joined) {
+            self.app_state.approval_markers.remove_room(account.as_str(), removed);
+            if let Ok(mut session) = self.app_state.approval_session.lock() {
+                session.remove_room(account.as_str(), removed);
+            }
+        }
+        self.approval_joined_rooms = joined;
+        if !self.approval_discovery.sync_membership(account.as_str(), &self.approval_joined_rooms) {
+            return None;
+        }
+        Some(account)
+    }
+
+    fn refresh_approval_discovery(&mut self, cx: &mut Cx) {
+        let Some(account_mxid) = self.sync_approval_membership(cx) else { return };
+        let requests = self.approval_discovery.select_due(Self::approval_now_ms());
+        let Some(first) = requests.first() else { return };
+        let generation = first.generation;
+        let rooms = requests.into_iter().filter_map(|request| {
+            RoomId::parse(request.room_id).ok().map(|id| (id, request.nonce))
+        }).collect();
+        submit_async_request(MatrixRequest::DiscoverApprovalRoomMarkers {
+            account_mxid, generation, rooms, enqueued_at: std::time::Instant::now(),
+        });
+    }
+
+    /// Apply shared state before RoomScreen handles the same result batch.
+    fn handle_approval_results(&mut self, cx: &mut Cx, actions: &Actions) {
+        use crate::approval_discovery::{ApprovalDiscoveryResult, DiscoveryOutcome};
+        use crate::approval_state::SendResult;
+        use crate::home::room_screen::ActionResponseResultAction;
+
+        for action in actions {
+            if let Some(result) = action.downcast_ref::<ApprovalDiscoveryResult>() {
+                let Some(account) = self.sync_approval_membership(cx) else { continue };
+                let now = Self::approval_now_ms();
+                if !self.approval_discovery.accept_result(&result.request, result.outcome, now) {
+                    continue;
+                }
+                let room = &result.request.room_id;
+                if result.observed_v2
+                    && self
+                        .app_state
+                        .approval_markers
+                        .observe_v2(account.as_str(), room)
+                        .is_err()
+                {
+                    self.app_state
+                        .approval_markers
+                        .mark_room_unavailable(account.as_str(), room);
+                }
+                match result.outcome {
+                    DiscoveryOutcome::Present => {
+                        let accepted = result.marker.as_ref().is_some_and(|event| {
+                            let Some(event_id) = event.get("event_id").and_then(serde_json::Value::as_str) else { return false };
+                            let Some(sender) = event.get("sender").and_then(serde_json::Value::as_str) else { return false };
+                            let Some(state_key) = event.get("state_key").and_then(serde_json::Value::as_str) else { return false };
+                            let Some(content) = event.get("content") else { return false };
+                            let Some(event_type) = event.get("type").and_then(serde_json::Value::as_str) else { return false };
+                            matches!(event_type, "com.agentchat.approval.room.v1" | "com.agentchat.approval.room.v2")
+                                && self.app_state.approval_markers.ingest_marker(
+                                    account.as_str(), room, event_id, event_type, sender, state_key, content, now,
+                                ).is_ok()
+                        });
+                        if !accepted {
+                            self.app_state.approval_markers.mark_room_unavailable(account.as_str(), room);
+                        }
+                    }
+                    DiscoveryOutcome::Absent => self.app_state.approval_markers.mark_room_unavailable(account.as_str(), room),
+                    DiscoveryOutcome::Failed => self.app_state.approval_markers.mark_room_unavailable(account.as_str(), room),
+                }
+                // Persist discovery evidence only. Revalidation flags are deliberately not serialized.
+                if let Err(error) = persistence::save_app_state(self.app_state.clone(), account) {
+                    error!("Failed to persist approval room discovery: {error}");
+                }
+                self.ui.redraw(cx);
+            }
+
+            let Some(result) = action.downcast_ref::<ActionResponseResultAction>() else { continue };
+            let (room, claim, outcome) = match result {
+                ActionResponseResultAction::Sent { room_id, approval_claim, .. } => (room_id, approval_claim, SendResult::Sent),
+                ActionResponseResultAction::Failed { room_id, approval_claim, outcome_unknown, .. } => (
+                    room_id, approval_claim,
+                    if *outcome_unknown { SendResult::OutcomeUnknown } else { SendResult::ConfirmedPreSendFailure },
+                ),
+            };
+            let Some(claim) = claim else { continue };
+            let Some(account) = current_user_id() else { continue };
+            if claim.account_mxid != account.as_str() || claim.approval_room_id != room.as_str() {
+                continue;
+            }
+            if let Ok(mut session) = self.app_state.approval_session.lock() {
+                session.record_send_result(claim, outcome, Self::approval_now_ms());
+            }
+            cx.action(AppStateAction::ApprovalRoomStateChanged { account_mxid: account, room_id: room.clone() });
+        }
+    }
+
+    fn open_pending_approvals(&mut self, cx: &mut Cx, agent: &str, project_room_id: &OwnedRoomId) {
+        use crate::approval_state::MarkerResolution;
+
+        let account = self.sync_approval_membership(cx);
+        let resolution = account.as_ref().filter(|_| self.approval_joined_rooms.contains(project_room_id.as_str()))
+            .map(|account| self.app_state.approval_markers.resolve(
+                account.as_str(), agent, project_room_id.as_str(),
+                &self.approval_joined_rooms.iter().cloned().collect(), Self::approval_now_ms(),
+            )).unwrap_or(MarkerResolution::Missing);
+        let room_name_id = match &resolution {
+            MarkerResolution::Unique(room) => RoomId::parse(room).ok()
+                .and_then(|id| cx.get_global::<RoomsListRef>().joined_room_name(&id)),
+            _ => None,
+        };
+        let Some(room_name_id) = room_name_id else {
+            self.pending_approval_navigation = None;
+            let key = if matches!(resolution, MarkerResolution::Ambiguous) {
+                "room_screen.approval.navigation_ambiguous"
+            } else {
+                "room_screen.approval.navigation_unavailable"
+            };
+            enqueue_popup_notification(tr_key(self.app_state.app_language, key), PopupKind::Info, Some(5.0));
+            self.refresh_approval_discovery(cx);
+            return;
+        };
+        if !effective_is_desktop(cx) && self.ui.stack_navigation(cx, ids!(view_stack)).is_transitioning() {
+            self.pending_approval_navigation = Some((agent.to_owned(), project_room_id.clone()));
+            return;
+        }
+        self.pending_approval_navigation = Some((agent.to_owned(), project_room_id.clone()));
+        enqueue_rooms_list_update(RoomsListUpdate::ScrollToRoom(room_name_id.room_id().clone()));
+        cx.widget_action(
+            self.ui.widget_uid(),
+            RoomsListAction::OpenPendingApprovals(SelectedRoom::JoinedRoom { room_name_id }),
+        );
+    }
+
     /// Returns `true` if the "Add an agent" sheet is waiting for this DM result
     /// (it created the direct room to bind an agent). When it is, the global
     /// DirectMessage handler should be skipped so the user stays in the sheet
@@ -3161,6 +3398,15 @@ impl App {
     /// selected room if it was this one, persists the app state if anything
     /// changed, and closes any open dock tabs for it.
     fn purge_room_ui_state(&mut self, cx: &mut Cx, room_id: &OwnedRoomId) {
+        if let Some(account) = self.approval_account.as_ref() {
+            self.app_state.approval_markers.remove_room(account.as_str(), room_id.as_str());
+            if let Ok(mut session) = self.app_state.approval_session.lock() {
+                session.remove_room(account.as_str(), room_id.as_str());
+            }
+            self.approval_joined_rooms.remove(room_id.as_str());
+            self.approval_discovery.sync_membership(account.as_str(), &self.approval_joined_rooms);
+        }
+        self.pending_approval_navigation = None;
         self.app_state
             .bot_settings
             .set_room_bound(room_id.clone(), None, false);
@@ -3373,6 +3619,12 @@ pub struct AppState {
     /// deserialize to an empty registry via `#[serde(default)]`.
     #[serde(default, deserialize_with = "crate::utils::deserialize_or_default")]
     pub agent_registry: AgentRegistry,
+    /// Shared across every cached/split pane; server projections remain the authority.
+    #[serde(skip)]
+    pub(crate) approval_session: std::sync::Arc<std::sync::Mutex<crate::approval_state::ApprovalSession>>,
+    /// Discovery cache only. Deserialization clears its current-run validation.
+    #[serde(default, deserialize_with = "crate::utils::deserialize_or_default")]
+    pub(crate) approval_markers: crate::approval_state::ApprovalMarkerIndex,
     /// Translation API configuration.
     #[serde(default, deserialize_with = "crate::utils::deserialize_or_default")]
     pub translation: crate::room::translation::TranslationConfig,
@@ -5035,6 +5287,9 @@ mod tests {
 /// These are *NOT* widget actions.
 #[derive(Debug)]
 pub enum AppStateAction {
+    ApprovalRoomStateChanged { account_mxid: OwnedUserId, room_id: OwnedRoomId },
+    OpenPendingApprovals { agent: String, project_room_id: OwnedRoomId },
+    RetryPendingApprovalNavigation,
     /// The given room was focused (selected).
     RoomFocused(SelectedRoom),
     /// Resets the focus to none, meaning that no room is selected.

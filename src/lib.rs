@@ -39,12 +39,15 @@ pub fn view_from_live_ptr(
 /// The top-level main application module.
 pub mod app;
 mod data_directory;
+mod approval_discovery;
 /// Function for loading and saving persistent application/session state.
 pub mod persistence;
 /// The settings screen and settings-related content/widgets.
 pub mod settings;
 /// App-localized text and language preference definitions.
 pub mod i18n;
+/// Pure, account-scoped state for agent-chat approval projections.
+pub(crate) mod approval_state;
 
 /// Login screen
 pub mod login;

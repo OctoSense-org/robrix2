@@ -27,6 +27,7 @@ use ruma::{OwnedUserId, api::client::receipt::create_receipt::v3::ReceiptType, e
 
 use matrix_sdk_ui::sync_service::State;
 use crate::{
+    approval_state::ApprovalClaimKey,
     app::{AppState, AppStateAction, BotSettingsState, ConfirmDeleteAction, PositiveConfirmationModalAction, SelectedRoom}, avatar_cache, event_preview::{plaintext_body_of_timeline_item, text_preview_of_encrypted_message, text_preview_of_member_profile_change, text_preview_of_other_message_like, text_preview_of_other_state, text_preview_of_room_membership_change, text_preview_of_timeline_item}, home::{bot_binding_modal::BotBindingModalAction, create_bot_modal::{CreateBotModalAction, CreateBotModalWidgetExt}, delete_bot_modal::{DeleteBotModalAction, DeleteBotModalWidgetExt}, edited_indicator::EditedIndicatorWidgetRefExt, encryption_notice::{EncryptionNoticeWidgetRefExt, first_other_member_display_name}, invite_modal::InviteModalAction, link_preview::{LinkPreviewCache, LinkPreviewRef, LinkPreviewWidgetRefExt}, loading_pane::{LoadingPaneState, LoadingPaneWidgetExt}, room_image_viewer::{get_image_name_and_filesize, populate_matrix_image_modal}, rooms_list::{RoomsListAction, RoomsListRef}, rooms_list_header::RoomsListHeaderAction, tombstone_footer::SuccessorRoomDetails}, i18n::{AppLanguage, tr_fmt, tr_key}, media_cache::{MediaCache, MediaCacheEntry}, profile::{
         user_profile::{ShowUserProfileAction, UserProfile, UserProfileAndRoomId, UserProfilePaneInfo, UserProfileSlidingPaneRef, UserProfileSlidingPaneWidgetExt},
         user_profile_cache,
@@ -58,6 +59,7 @@ use rangemap::RangeSet;
 
 use super::{ContextMenuOpenGesture, event_reaction_list::ReactionData, invite_modal::is_invite_modal_open, loading_pane::LoadingPaneRef, new_message_context_menu::{MessageAbilities, MessageDetails}, room_read_receipt::{self, populate_read_receipts, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT}};
 
+mod action_scope;
 mod bot_admin;
 mod bot_message;
 mod dsl;
@@ -74,6 +76,7 @@ mod thread_lifecycle;
 mod threads_pane;
 mod updates;
 
+use action_scope::room_control_action;
 pub use bot_admin::*;
 use bot_message::*;
 pub use message::*;
@@ -135,6 +138,35 @@ fn item_event_id(item: &Arc<TimelineItem>) -> Option<&EventId> {
     event.event_id()
 }
 
+#[derive(Default)]
+struct LatestApprovalNavigation {
+    room_id: Option<OwnedRoomId>,
+}
+
+impl LatestApprovalNavigation {
+    fn request(&mut self, displayed: Option<&TimelineKind>, requested_room: &RoomId) -> bool {
+        if !matches!(
+            displayed,
+            Some(TimelineKind::MainRoom { room_id }) if room_id == requested_room
+        ) {
+            return false;
+        }
+        self.room_id = Some(requested_room.to_owned());
+        true
+    }
+
+    fn resolve(&mut self, displayed: Option<&TimelineKind>, item_count: usize) -> Option<usize> {
+        let requested_room = self.room_id.as_deref()?;
+        if !matches!(displayed, Some(TimelineKind::MainRoom { room_id }) if room_id == requested_room) {
+            self.room_id = None;
+            return None;
+        }
+        let last_index = item_count.checked_sub(1)?;
+        self.room_id = None;
+        Some(last_index)
+    }
+}
+
 /// Registers this module's DSL blocks in dependency order: the sliding
 /// panes, the report modal, and the app-service panel first — the
 /// `RoomScreen` template in `dsl` references them via `mod.widgets.*`, and a
@@ -162,6 +194,9 @@ pub struct RoomScreen {
     #[rust] timeline_kind: Option<TimelineKind>,
     /// The persistent UI-relevant states for the room that this widget is currently displaying.
     #[rust] tl_state: Option<TimelineUiState>,
+    /// Exact room for a one-shot public-CTA request to show the latest private
+    /// approval. Kept on the addressed RoomScreen, never as ambient app state.
+    #[rust] latest_approval_navigation: LatestApprovalNavigation,
     /// Whether this RoomScreen is currently visible and should consume room-specific signals.
     #[rust] timeline_updates_enabled: bool,
     /// Restarts paused streaming timers on the first signal after becoming visible.
@@ -211,6 +246,8 @@ pub struct RoomScreen {
     #[rust] octos_action_button_contexts: HashMap<(OwnedEventId, usize), OctosActionButtonContext>,
     #[rust] disabled_octos_action_source_event_ids: HashSet<OwnedEventId>,
     #[rust] selected_octos_action_by_source_event_id: HashMap<OwnedEventId, SelectedOctosActionState>,
+    #[rust] approval_render_epoch: u64,
+    #[rust] approval_fold_pending: bool,
     /// Per-room state for the server-side search pane. Tracks the active
     /// query, the room it targets, the most recent `next_batch` token, and
     /// whether a request is currently in flight.
@@ -645,7 +682,7 @@ impl Widget for RoomScreen {
                 }
 
                 // Mobile RoomTopBar (header + Chat/Info tabs) actions.
-                match action.as_widget_action().cast::<RoomTopBarAction>() {
+                match room_control_action(action, &[self.room_top_bar(cx, ids!(room_top_bar)).widget_uid()]).cast::<RoomTopBarAction>() {
                     RoomTopBarAction::Back => {
                         cx.widget_action(room_screen_widget_uid, StackNavigationAction::Pop);
                     }
@@ -804,22 +841,47 @@ impl Widget for RoomScreen {
                         });
                     }
                 }
-                if let Some(ActionResponseResultAction::Failed { room_id, source_event_id, error }) = action.downcast_ref() {
+                if let Some(ActionResponseResultAction::Failed {
+                    room_id,
+                    source_event_id,
+                    error,
+                    approval_claim,
+                    outcome_unknown,
+                }) = action.downcast_ref() {
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
-                        clear_action_buttons_disabled(
-                            &mut self.disabled_octos_action_source_event_ids,
-                            source_event_id.as_ref(),
-                        );
-                        clear_selected_octos_action(
-                            &mut self.selected_octos_action_by_source_event_id,
-                            source_event_id.as_ref(),
-                        );
+                        let should_restore = approval_claim.as_ref().is_none_or(|claim| {
+                            if *outcome_unknown {
+                                return false;
+                            }
+                            scope.data.get::<AppState>()
+                                .and_then(|state| state.approval_session.lock().ok())
+                                .is_some_and(|session| session.is_actionable(
+                                    &claim.account_mxid,
+                                    &claim.approval_room_id,
+                                    &claim.request_id,
+                                    current_unix_time_millis(),
+                                ))
+                        });
+                        if should_restore {
+                            clear_action_buttons_disabled(
+                                &mut self.disabled_octos_action_source_event_ids,
+                                source_event_id.as_ref(),
+                            );
+                            clear_selected_octos_action(
+                                &mut self.selected_octos_action_by_source_event_id,
+                                source_event_id.as_ref(),
+                            );
+                        }
                         self.invalidate_timeline_event_content(source_event_id.as_ref());
                         self.redraw_timeline_list(cx);
                         enqueue_popup_notification(
                             tr_fmt(
                                 self.app_language,
-                                "room_screen.popup.action_response.failed",
+                                if *outcome_unknown {
+                                    "room_screen.popup.action_response.outcome_unknown"
+                                } else {
+                                    "room_screen.popup.action_response.failed"
+                                },
                                 &[("error", error.as_str())],
                             ),
                             PopupKind::Error,
@@ -828,12 +890,9 @@ impl Widget for RoomScreen {
                     }
                 }
 
-                // No `widget_uid_eq` filter here — `OpenThread` is emitted from
-                // a `ThreadsPaneEntry` (a list item), not from the pane itself,
-                // so its widget_uid is the entry's. `LoadMoreRequested` and
-                // `CloseRequested` come from the pane, but `cast_ref` handles
-                // all three regardless of emitter.
-                match action.as_widget_action().cast_ref::<ThreadsPaneAction>() {
+                // Entries emit under their pane's UID so cached room/thread
+                // tabs only handle selections from their own pane.
+                match room_control_action(action, &[threads_sliding_pane.widget_uid()]).cast_ref::<ThreadsPaneAction>() {
                     ThreadsPaneAction::OpenThread(thread_root_event_id) => {
                         log!("RoomScreen: OpenThread received, jumping to {}", thread_root_event_id);
                         threads_sliding_pane.hide(cx);
@@ -1001,7 +1060,7 @@ impl Widget for RoomScreen {
 
             // Floating threads button click → open the threads sliding pane.
             for action in actions {
-                if let ThreadsButtonAction::OpenRequested = action.as_widget_action().cast_ref() {
+                if let ThreadsButtonAction::OpenRequested = room_control_action(action, &[self.view.threads_button(cx, ids!(timeline.threads_button)).widget_uid()]).cast_ref() {
                     self.show_threads_pane(cx);
                     break;
                 }
@@ -1010,7 +1069,7 @@ impl Widget for RoomScreen {
             // Floating info button click → open the room info sliding pane
             // (desktop only — the button is hidden on mobile).
             for action in actions {
-                if let InfoButtonAction::OpenRequested = action.as_widget_action().cast_ref() {
+                if let InfoButtonAction::OpenRequested = room_control_action(action, &[self.view.widget(cx, ids!(timeline.info_button)).widget_uid()]).cast_ref() {
                     self.show_room_info_pane(cx, scope.data.get::<AppState>());
                     break;
                 }
@@ -1558,6 +1617,17 @@ impl Widget for RoomScreen {
         }
         self.last_has_encryption_notice = Some(has_encryption_notice);
 
+        let approval_session = scope.data.get::<AppState>().map(|state| state.approval_session.clone());
+        if let (Some(session), Some(account), Some(tl)) = (&approval_session, current_user_id(), self.tl_state.as_mut()) {
+            if let Ok(session) = session.lock() {
+                let epoch = session.room_epoch(account.as_str(), tl.kind.room_id().as_str());
+                if epoch != self.approval_render_epoch {
+                    self.approval_render_epoch = epoch;
+                    tl.content_drawn_since_last_update.clear();
+                    self.octos_action_button_contexts.clear();
+                }
+            }
+        }
         let mut room_scope = if let Some(app_state) = scope.data.get_mut::<AppState>() {
             Scope::with_data_props(app_state, &room_props)
         } else {
@@ -1700,6 +1770,7 @@ impl Widget for RoomScreen {
                                                 &self.disabled_octos_action_source_event_ids,
                                                 &self.selected_octos_action_by_source_event_id,
                                                 &tl_state.expanded_bot_body_event_ids,
+                                                approval_session.as_ref(),
                                             );
                                             action_contexts_changed |= contexts_rebound;
                                             (item, drawn_status)
@@ -2208,6 +2279,8 @@ impl RoomScreen {
         self.octos_action_button_contexts.clear();
         self.disabled_octos_action_source_event_ids.clear();
         self.selected_octos_action_by_source_event_id.clear();
+        self.approval_render_epoch = 0;
+        self.approval_fold_pending = false;
 
         self.set_timeline_updates_enabled(false);
         self.save_state();
@@ -2445,6 +2518,38 @@ impl RoomScreen {
         self.show_timeline(cx);
     }
 
+    fn apply_latest_approval_request(&mut self, cx: &mut Cx) -> bool {
+        let item_count = self.tl_state.as_ref().map_or(0, |timeline| timeline.items.len());
+        let Some(last_index) = self
+            .latest_approval_navigation
+            .resolve(self.timeline_kind.as_ref(), item_count)
+        else {
+            return false;
+        };
+
+        let has_encryption_notice = self.current_has_encryption_notice(cx);
+        let portal_list = self.portal_list(cx, ids!(timeline.list));
+        portal_list.set_first_id_and_scroll(
+            item_id_from_tl_idx(last_index, has_encryption_notice),
+            0.0,
+        );
+        portal_list.set_tail_range(true);
+        self.jump_to_bottom_button(cx, ids!(jump_to_bottom_button))
+            .update_visibility(cx, true);
+        self.redraw(cx);
+        true
+    }
+
+    pub fn show_latest_approval(&mut self, cx: &mut Cx, room_id: &RoomId) {
+        if !self.latest_approval_navigation.request(
+            self.timeline_kind.as_ref(),
+            room_id,
+        ) {
+            return;
+        }
+        self.apply_latest_approval_request(cx);
+    }
+
     /// Sends read receipts based on the current scroll position of the timeline.
     fn send_user_read_receipts_based_on_scroll_pos(
         &mut self,
@@ -2567,6 +2672,11 @@ impl RoomScreenRef {
     pub fn set_timeline_updates_enabled(&self, enabled: bool) {
         let Some(mut inner) = self.borrow_mut() else { return };
         inner.set_timeline_updates_enabled(enabled);
+    }
+
+    pub fn show_latest_approval(&self, cx: &mut Cx, room_id: &RoomId) {
+        let Some(mut inner) = self.borrow_mut() else { return };
+        inner.show_latest_approval(cx, room_id);
     }
 }
 
@@ -2695,11 +2805,14 @@ pub enum ActionResponseResultAction {
     Sent {
         room_id: OwnedRoomId,
         source_event_id: OwnedEventId,
+        approval_claim: Option<ApprovalClaimKey>,
     },
     Failed {
         room_id: OwnedRoomId,
         source_event_id: OwnedEventId,
         error: String,
+        approval_claim: Option<ApprovalClaimKey>,
+        outcome_unknown: bool,
     },
 }
 
@@ -2727,6 +2840,51 @@ mod tests {
         assert_eq!(item_id_from_tl_idx(0, true), 1);
         assert_eq!(item_id_from_tl_idx(6, true), 7);
         assert_eq!(item_id_from_tl_idx(6, false), 6);
+    }
+
+    #[test]
+    fn latest_approval_navigation_is_room_bound_deferred_and_one_shot() {
+        let approval_room = OwnedRoomId::try_from("!approvals:example.org").unwrap();
+        let other_room = OwnedRoomId::try_from("!other:example.org").unwrap();
+        let approval_timeline = TimelineKind::MainRoom {
+            room_id: approval_room.clone(),
+        };
+        let other_timeline = TimelineKind::MainRoom {
+            room_id: other_room.clone(),
+        };
+        let approval_thread = TimelineKind::Thread {
+            room_id: approval_room.clone(),
+            thread_root_event_id: OwnedEventId::try_from("$thread:example.org").unwrap(),
+        };
+        let mut navigation = LatestApprovalNavigation::default();
+
+        assert!(!navigation.request(Some(&other_timeline), &approval_room));
+        assert!(!navigation.request(Some(&approval_thread), &approval_room));
+        assert_eq!(navigation.resolve(Some(&approval_timeline), 3), None);
+
+        assert!(navigation.request(Some(&approval_timeline), &approval_room));
+        assert_eq!(navigation.resolve(Some(&approval_timeline), 0), None);
+        assert_eq!(navigation.resolve(Some(&approval_timeline), 4), Some(3));
+        assert_eq!(navigation.resolve(Some(&approval_timeline), 4), None);
+
+        assert!(navigation.request(Some(&approval_timeline), &approval_room));
+        assert_eq!(navigation.resolve(Some(&other_timeline), 4), None);
+        assert_eq!(navigation.resolve(Some(&approval_timeline), 4), None);
+    }
+
+    #[test]
+    fn deferred_approval_navigation_rejects_same_room_thread_reuse() {
+        let room_id = OwnedRoomId::try_from("!approvals:example.org").unwrap();
+        let main = TimelineKind::MainRoom { room_id: room_id.clone() };
+        let thread = TimelineKind::Thread {
+            room_id: room_id.clone(),
+            thread_root_event_id: OwnedEventId::try_from("$thread:example.org").unwrap(),
+        };
+        let mut navigation = LatestApprovalNavigation::default();
+        assert!(navigation.request(Some(&main), &room_id));
+        assert_eq!(navigation.resolve(Some(&main), 0), None);
+        assert_eq!(navigation.resolve(Some(&thread), 5), None);
+        assert_eq!(navigation.resolve(Some(&main), 5), None);
     }
 
     #[test]
