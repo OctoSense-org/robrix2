@@ -12,8 +12,10 @@
 #      `manual_test_*` selectors, which agent-spec reports as `skip`, and the
 #      boundary layer applies the whole change set to every spec, so a naive
 #      `agent-spec guard` fails on every PR. Instead:
-#        - specs changed in this change set are the active contracts: run
-#          `lifecycle` WITH the change set (boundaries + tests), fail on failed>0;
+#        - a single changed contract receives the full change set;
+#        - multiple active contracts collectively cover every changed path,
+#          then each runs `lifecycle` with its owned paths (boundaries + tests).
+#          Shared files go to every declaring task; explicit denies still fail;
 #        - all other specs are regression checks: run `verify` WITHOUT a change
 #          set (tests only), fail on failed>0. Skips are tolerated.
 #
@@ -101,39 +103,17 @@ for cap in specs/capabilities/*.spec.md; do
 done
 
 # ---- 4. task specs ---------------------------------------------------------------
-# 4a. Changed specs are the active contracts of this change: verify them WITH the
-#     change set (boundaries + bound tests). Manual `skip`s are tolerated; any
-#     `failed > 0` (test or boundary violation) fails the gate.
+# 4a. Changed specs own the change collectively, not by intersecting unrelated
+#     allow-lists. The helper checks total path coverage and explicit denies,
+#     then runs the native lifecycle boundary verifier and tests for each scope.
+#     Manual skips stay visible; failures and uncertain results fail the gate.
 # 4b. Every other spec is a regression check: verify WITHOUT a change set (no
 #     boundary layer, since foreign files would trivially violate them) and fail
 #     only on `failed > 0`.
 say "4/4 task specs: changed = contract check (with change set), others = regression (tests only)"
 CHANGE_ARGS=()
 for f in "${CHANGED[@]:-}"; do [ -n "$f" ] && [ -e "$f" ] && CHANGE_ARGS+=(--change "$f"); done
-summary_failed() { grep -Eo '"failed": [0-9]+' | head -1 | grep -Eo '[0-9]+'; }
-is_changed_spec() { local x; for x in "${CHANGED_SPECS[@]:-}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
-for spec in specs/*.spec.md; do
-  case "$spec" in specs/project.spec.md) continue;; esac
-  if is_changed_spec "$spec"; then
-    out="$(agent-spec lifecycle "$spec" --code . --run-log-dir .agent-spec/runs "${CHANGE_ARGS[@]}" --format json 2>&1 || true)"
-    n="$(echo "$out" | summary_failed || echo "?")"
-    if [ "$n" != "0" ]; then
-      echo "FAIL (contract): $spec — failed=$n"
-      echo "$out" | grep -E '"reason": "not covered|"verdict": "fail"' -B3 | grep -E 'reason|step_text|scenario_name' | head -12
-      fail=1
-    else
-      echo "ok (contract): $spec"
-    fi
-  else
-    out="$(agent-spec verify "$spec" --code . --format json 2>&1 || true)"
-    n="$(echo "$out" | summary_failed || echo "?")"
-    if [ "$n" != "0" ]; then
-      echo "FAIL (regression): $spec — failed=$n"
-      echo "$out" | grep -E '"verdict": "fail"' -B8 | grep -E 'scenario_name|reason' | head -8
-      fail=1
-    fi
-  fi
-done
+if ! python3 scripts/spec_guard.py "${CHANGE_ARGS[@]}"; then fail=1; fi
 
 if [ "$fail" = "0" ]; then echo; echo "spec-guard: OK"; else echo; echo "spec-guard: FAILED"; fi
 exit "$fail"
