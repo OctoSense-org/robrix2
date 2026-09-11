@@ -168,6 +168,7 @@ impl RoomScreen {
     ) {
         let pane = self.search_messages_sliding_pane(cx, ids!(search_messages_pane));
         let button = self.search_messages_button(cx, ids!(timeline.search_messages_button));
+        let owners = [pane.widget_uid(), button.widget_uid(), self.widget_uid()];
 
         let mut requested_close = false;
         let mut requested_open = false;
@@ -176,11 +177,9 @@ impl RoomScreen {
         let mut jump_target: Option<OwnedEventId> = None;
 
         for action in actions {
-            // Widget-emitted actions are wrapped in a `WidgetAction`, so we
-            // must unwrap via `as_widget_action()` before downcasting to the
-            // inner `SearchMessagesAction`. `cast_ref` falls back to the
-            // `None` sentinel for non-matching actions.
-            match action.as_widget_action().cast_ref::<SearchMessagesAction>() {
+            // Result rows emit under the pane UID; the RoomTopBar search
+            // control relays under this room screen's UID.
+            match room_control_action(action, &owners).cast_ref::<SearchMessagesAction>() {
                 SearchMessagesAction::OpenRequested => requested_open = true,
                 SearchMessagesAction::CloseRequested => requested_close = true,
                 SearchMessagesAction::QueryChanged(q) => new_query = Some(q.clone()),

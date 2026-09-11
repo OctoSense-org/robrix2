@@ -985,7 +985,7 @@ script_mod! {
                         width: Fill
                         height: Fill
                         flow: Down
-                        max_pull_down: 0.0
+                        bounce_at_start: false
 
                         PersonEntry := mod.widgets.RoomInfoPeopleEntry {}
                     }
@@ -1320,6 +1320,9 @@ pub struct RoomInfoSlidingPane {
 
     #[rust] info: Option<RoomInfoPaneInfo>,
     #[rust] is_animating_out: bool,
+    /// The hidden overlay has no current draw area. Focus it only after its
+    /// first visible draw, unless another widget takes focus in the meantime.
+    #[rust] focus_after_draw: bool,
     #[rust] show_people_page: bool,
     #[rust] topic_expanded: bool,
     #[rust] people_display_count: usize,
@@ -1357,6 +1360,9 @@ pub(super) fn show_avatar_or_text(
 
 impl Widget for RoomInfoSlidingPane {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        if matches!(event, Event::KeyFocus(_) | Event::KeyFocusLost(_)) {
+            self.focus_after_draw = false;
+        }
         self.view.handle_event(cx, event, scope);
 
         if !self.visible { return; }
@@ -1369,7 +1375,9 @@ impl Widget for RoomInfoSlidingPane {
         if self.is_animating_out && !self.animator.is_track_animating(id!(panel)) {
             self.visible = false;
             self.is_animating_out = false;
-            cx.revert_key_focus();
+            if cx.has_key_focus(self.view.area()) {
+                cx.revert_key_focus();
+            }
             self.view(cx, ids!(bg_view)).set_visible(cx, false);
             self.redraw(cx);
             return;
@@ -1434,7 +1442,8 @@ impl Widget for RoomInfoSlidingPane {
                     Event::Actions(actions) if self.button(cx, ids!(close_button)).clicked(actions)
                 )
                 || event.back_pressed()
-                || match event.hits_with_capture_overload(cx, area, true) {
+                // Respect hits already captured by an overlay modal or child.
+                || match event.hits(cx, area) {
                     Hit::KeyUp(key) => key.key_code == KeyCode::Escape,
                     Hit::FingerDown(_fde) => {
                         cx.set_key_focus(area);
@@ -1534,6 +1543,7 @@ impl Widget for RoomInfoSlidingPane {
             // force-hide just because info hasn't been populated yet.
             if !self.inline {
                 self.visible = false;
+                self.focus_after_draw = false;
             }
             return self.view.draw_walk(cx, scope, walk);
         };
@@ -1649,6 +1659,13 @@ impl Widget for RoomInfoSlidingPane {
                 item.draw_all(cx, &mut Scope::empty());
             }
         }
+        if self.focus_after_draw && self.visible && !self.inline && !self.is_animating_out {
+            let area = self.view.area();
+            if area.is_valid(cx) {
+                self.focus_after_draw = false;
+                cx.set_key_focus(area);
+            }
+        }
         DrawStep::done()
     }
 }
@@ -1705,7 +1722,7 @@ impl RoomInfoSlidingPane {
         self.show_people_page = false;
         self.topic_expanded = false;
         self.people_display_count = 0;
-        cx.set_key_focus(self.view.area());
+        self.focus_after_draw = !self.inline;
         self.animator_play(cx, ids!(panel.show));
         self.view(cx, ids!(bg_view)).set_visible(cx, true);
         self.view.button(cx, ids!(close_button)).reset_hover(cx);
@@ -1713,6 +1730,7 @@ impl RoomInfoSlidingPane {
     }
 
     pub fn hide(&mut self, cx: &mut Cx) {
+        self.focus_after_draw = false;
         if !self.visible {
             return;
         }
@@ -1739,6 +1757,9 @@ impl RoomInfoSlidingPaneRef {
     pub fn set_inline(&self, inline: bool) {
         if let Some(mut inner) = self.borrow_mut() {
             inner.inline = inline;
+            if inline {
+                inner.focus_after_draw = false;
+            }
         }
     }
 

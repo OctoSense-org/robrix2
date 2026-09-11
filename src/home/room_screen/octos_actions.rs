@@ -3,6 +3,9 @@
 //! populate pass.
 
 use super::*;
+use crate::approval_state::{
+    ApprovalAction, ApprovalClaimKey, ApprovalSession, ApprovalView, CanonicalApprovalState, ClaimState,
+};
 
 pub(super) const MAX_OCTOS_ACTION_BUTTONS: usize = 6;
 pub(super) const AGENTCHAT_APPROVAL_EVENT_KEY: &str = "com.agentchat.approval";
@@ -323,7 +326,11 @@ pub(super) fn parse_agentchat_approval_request_from_content(
         title: tool_name.to_owned(),
         summary,
         risk_level: OctosApprovalRiskLevel::Normal,
-        authorized_approvers: Vec::new(),
+        authorized_approvers: approval.get("owner_mxid")
+            .and_then(serde_json::Value::as_str)
+            .filter(|owner| UserId::parse(*owner).is_ok())
+            .map(|owner| vec![owner.to_owned()])
+            .unwrap_or_default(),
         expires_at: expires_at.to_string(),
         on_timeout: OctosApprovalTimeoutBehavior::Notify,
     })
@@ -423,6 +430,13 @@ pub(super) fn parse_octos_action_payload_for_render(
                 .map(parse_agentchat_approval_actions_from_detail)
                 .unwrap_or_default(),
         }
+    } else if original_content.is_some_and(|content| matches!(
+        content.get("msgtype").and_then(serde_json::Value::as_str),
+        Some(AGENTCHAT_APPROVAL_STATUS_MSGTYPE | AGENTCHAT_APPROVAL_VERDICT_MSGTYPE)
+    )) {
+        // State projections never supply verdict or generic action controls.
+        // Navigation is a separate local presentation of the public notice.
+        Vec::new()
     } else {
         content
             .map(parse_octos_actions_from_content)
@@ -542,6 +556,11 @@ pub(super) struct OctosActionResponseRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum OctosActionButtonRequest {
+    OpenPendingApprovals {
+        agent: String,
+        project_room_id: OwnedRoomId,
+        label: String,
+    },
     Generic {
         action_id: String,
         label: String,
@@ -562,6 +581,7 @@ pub(super) enum OctosActionButtonRequest {
 impl OctosActionButtonRequest {
     pub(super) fn action_id(&self) -> &str {
         match self {
+            Self::OpenPendingApprovals { .. } => "view_pending_approvals",
             Self::Generic { action_id, .. } => action_id,
             Self::Approval { decision, .. } => decision,
         }
@@ -569,6 +589,7 @@ impl OctosActionButtonRequest {
 
     pub(super) fn label(&self) -> &str {
         match self {
+            Self::OpenPendingApprovals { label, .. } => label,
             Self::Generic { label, .. } => label,
             Self::Approval { label, .. } => label,
         }
@@ -576,13 +597,14 @@ impl OctosActionButtonRequest {
 
     pub(super) fn style(&self) -> OctosActionStyle {
         match self {
+            Self::OpenPendingApprovals { .. } => OctosActionStyle::Secondary,
             Self::Generic { style, .. } | Self::Approval { style, .. } => *style,
         }
     }
 
     fn expiry_millis(&self) -> Option<u64> {
         match self {
-            Self::Generic { .. } => None,
+            Self::Generic { .. } | Self::OpenPendingApprovals { .. } => None,
             Self::Approval { protocol, expires_at, .. } => {
                 approval_expiry_millis(protocol, expires_at)
             }
@@ -736,10 +758,9 @@ pub(super) fn local_user_can_approve(
         ApprovalProtocol::Octos => approval_request.authorized_approvers
             .iter()
             .any(|approver| approver == current_user_id.as_str()),
-        // The dedicated encrypted approval room only contains the owner and
-        // managed service accounts. This enables the UI affordance, but is not
-        // an authorization decision: agent-chat still validates event.sender.
-        ApprovalProtocol::AgentChat { .. } => true,
+        ApprovalProtocol::AgentChat { .. } => approval_request.authorized_approvers
+            .iter()
+            .any(|owner| owner == current_user_id.as_str()),
     }
 }
 
@@ -785,6 +806,119 @@ pub(super) fn are_action_buttons_disabled(
     disabled_source_event_ids.contains(source_event_id)
 }
 
+pub(super) fn approval_action_notification_matches(
+    payload: &serde_json::Value,
+    pane: u64,
+    item: u64,
+    source: &str,
+    slot: usize,
+) -> bool {
+    pane != 0 && item != 0
+        && payload.get("pane").and_then(serde_json::Value::as_str) == Some(pane.to_string().as_str())
+        && payload.get("item").and_then(serde_json::Value::as_str) == Some(item.to_string().as_str())
+        && payload.get("source").and_then(serde_json::Value::as_str) == Some(source)
+        && payload.get("slot").and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok()) == Some(slot)
+}
+
+/// The destination is always derived from private local discovery. Public
+/// payloads with additional approval fields cannot become a navigation control.
+pub(super) fn public_approval_notice_agent(content: &serde_json::Value) -> Option<&str> {
+    if content.get("msgtype")?.as_str()? != AGENTCHAT_APPROVAL_STATUS_MSGTYPE { return None; }
+    let detail = content.get(AGENTCHAT_APPROVAL_EVENT_KEY)?.as_object()?;
+    if detail.len() != 5
+        || detail.get("version")?.as_u64()? != 1
+        || detail.get("kind")?.as_str()? != "status"
+        || detail.get("state")?.as_str()? != "waiting_for_owner"
+        || detail.get("project")?.as_str()?.is_empty()
+    { return None; }
+    let agent = detail.get("agent")?.as_str()?;
+    (!agent.is_empty() && agent.len() <= 128 && agent.trim() == agent).then_some(agent)
+}
+
+pub(super) fn fold_approval_events(
+    app_state: Option<&AppState>,
+    room: &RoomId,
+    items: &Vector<Arc<TimelineItem>>,
+) -> bool {
+    let (Some(app_state), Some(account)) = (app_state, current_user_id()) else { return false };
+    let Ok(mut session) = app_state.approval_session.lock() else { return false };
+    let before = session.room_epoch(account.as_str(), room.as_str());
+    for item in items {
+        let Some(event) = item.as_event() else { continue };
+        let Some(event_id) = event.event_id() else { continue };
+        let Some(content) = original_event_content_json(event) else { continue };
+        if !matches!(content.get("msgtype").and_then(serde_json::Value::as_str),
+            Some(AGENTCHAT_APPROVAL_REQUEST_MSGTYPE | AGENTCHAT_APPROVAL_STATUS_MSGTYPE))
+        { continue; }
+        session.ingest_message(account.as_str(), room.as_str(), event_id.as_str(),
+            event.sender().as_str(), &content, current_unix_time_millis());
+    }
+    let changed = session.room_epoch(account.as_str(), room.as_str()) != before;
+    drop(session);
+    if changed {
+        Cx::post_action(AppStateAction::ApprovalRoomStateChanged {
+            account_mxid: account, room_id: room.to_owned(),
+        });
+    }
+    changed
+}
+
+pub(super) fn approval_claim_for_context(
+    context: &OctosActionButtonContext,
+    account: &UserId,
+    room: &RoomId,
+) -> Option<(ApprovalClaimKey, ApprovalAction)> {
+    let OctosActionButtonRequest::Approval {
+        protocol: ApprovalProtocol::AgentChat { .. }, request_id, tool_args_digest, decision, ..
+    } = &context.request else { return None };
+    let action = match decision.as_str() {
+        "approve_once" => ApprovalAction::ApproveOnce,
+        "deny" => ApprovalAction::Deny,
+        _ => return None,
+    };
+    Some((ApprovalClaimKey {
+        account_mxid: account.to_string(), approval_room_id: room.to_string(),
+        request_id: request_id.clone(), input_digest: tool_args_digest.clone(),
+    }, action))
+}
+
+fn legacy_approval_status_for_original(
+    view: &ApprovalView,
+    account: &str,
+    room: &str,
+    event_id: &str,
+    actual_original_sender: &str,
+    original_content: &serde_json::Value,
+) -> Option<CanonicalApprovalState> {
+    if !view.legacy_read_only || view.conflicted
+        || view.binding.owner_mxid != account || view.binding.approval_room_id != room
+        || view.binding.publisher_mxid != actual_original_sender
+        || view.legacy_original_event_id.as_deref() != Some(event_id)
+        || original_content.get("m.new_content").is_some()
+        || original_content.get("m.relates_to").and_then(|r| r.get("rel_type"))
+            .and_then(serde_json::Value::as_str) == Some("m.replace")
+    { return None; }
+    parse_agentchat_approval_request_from_content(original_content)?;
+    let detail = original_content.get(AGENTCHAT_APPROVAL_EVENT_KEY)?;
+    // Compare the raw tuple exactly; the old display parser's whitespace
+    // normalization must not turn a different request into provenance proof.
+    for (field, expected) in [
+        ("request_id", view.binding.request_id.as_str()),
+        ("agent", view.binding.agent.as_str()),
+        ("project", view.binding.project.as_str()),
+        ("project_room_id", view.binding.project_room_id.as_str()),
+        ("input_digest", view.binding.input_digest.as_str()),
+    ] {
+        if detail.get(field).and_then(serde_json::Value::as_str) != Some(expected) { return None; }
+    }
+    for (field, expected) in [("owner_mxid", account), ("publisher_mxid", actual_original_sender)] {
+        if let Some(value) = detail.get(field) {
+            if value.as_str() != Some(expected) { return None; }
+        }
+    }
+    Some(view.state)
+}
 
 pub(super) fn populate_octos_action_buttons(
     cx: &mut Cx,
@@ -798,6 +932,9 @@ pub(super) fn populate_octos_action_buttons(
     action_button_contexts: &mut HashMap<(OwnedEventId, usize), OctosActionButtonContext>,
     disabled_source_event_ids: &HashSet<OwnedEventId>,
     selected_actions: &HashMap<OwnedEventId, SelectedOctosActionState>,
+    pane_uid: WidgetUid,
+    room_id: &OwnedRoomId,
+    approval_session: Option<&std::sync::Arc<std::sync::Mutex<ApprovalSession>>>,
 ) {
     let container = item.view(cx, ids!(content.action_buttons));
     if content.is_none() && original_content.is_none() {
@@ -817,11 +954,78 @@ pub(super) fn populate_octos_action_buttons(
         warning!("approval request: skipping malformed structured payload");
     }
 
-    let render_state = compute_action_button_render_state(
+    let mut render_state = compute_action_button_render_state(
         &parsed_payload.actions,
         parsed_payload.approval_request.as_ref(),
         current_user_id().as_deref(),
     );
+    let public_agent = original_content.and_then(public_approval_notice_agent);
+    if public_agent.is_some() {
+        render_state.show_container = true;
+        render_state.show_button_row = true;
+        render_state.visible_slots = vec![ActionButtonRenderSlot {
+            id: "view_pending_approvals".into(),
+            label: tr_key(app_language, "room_screen.approval.view_pending").into(),
+            style: OctosActionStyle::Secondary,
+        }];
+    }
+    let mut canonical_label = None;
+    let mut runtime_consumed = false;
+    if let Some(request) = parsed_payload.approval_request.as_ref()
+        .filter(|request| matches!(request.protocol, ApprovalProtocol::AgentChat { .. }))
+    {
+        // Missing, poisoned or incomplete shared state leaves native controls disabled.
+        render_state.buttons_enabled = false;
+        if let (Some(account), Some(session)) = (current_user_id(), approval_session) {
+            if let Ok(session) = session.lock() {
+                render_state.buttons_enabled = session.is_actionable(
+                    account.as_str(), room_id.as_str(), &request.request_id, current_unix_time_millis(),
+                );
+                if let Some(view) = session.approval(account.as_str(), room_id.as_str(), &request.request_id) {
+                    let claim_key = ApprovalClaimKey {
+                        account_mxid: account.to_string(),
+                        approval_room_id: room_id.to_string(),
+                        request_id: view.binding.request_id.clone(),
+                        input_digest: view.binding.input_digest.clone(),
+                    };
+                    let legacy_state = original_content.and_then(|original| legacy_approval_status_for_original(
+                        &view, account.as_str(), room_id.as_str(), source_event_id.as_str(),
+                        original_sender.as_str(), original,
+                    ));
+                    canonical_label = Some(if view.conflicted || (view.legacy_read_only && legacy_state.is_none()) {
+                        "room_screen.approval.unavailable"
+                    } else if let Some(state) = legacy_state {
+                        match state {
+                            CanonicalApprovalState::Pending => "room_screen.approval.pending",
+                            CanonicalApprovalState::Approved => "room_screen.approval.approved",
+                            CanonicalApprovalState::Denied => "room_screen.approval.denied",
+                            CanonicalApprovalState::Expired => "room_screen.approval.expired",
+                            CanonicalApprovalState::Consumed => { runtime_consumed = true; "room_screen.approval.consumed" },
+                        }
+                    } else {
+                        match view.state {
+                            CanonicalApprovalState::Pending => match session.claim_state(&claim_key) {
+                                Some(ClaimState::Claimed) => "room_screen.approval.submitting",
+                                Some(ClaimState::Sent) => "room_screen.approval.sent_awaiting_canonical",
+                                Some(ClaimState::OutcomeUnknown) => "room_screen.approval.outcome_unknown",
+                                None if approval_request_is_expired(
+                                    request,
+                                    current_unix_time_millis(),
+                                ) => "room_screen.approval.expired",
+                                None if render_state.buttons_enabled => "room_screen.approval.pending",
+                                None => "room_screen.approval.unavailable",
+                            },
+                            CanonicalApprovalState::Approved => "room_screen.approval.approved",
+                            CanonicalApprovalState::Denied => "room_screen.approval.denied",
+                            CanonicalApprovalState::Expired => "room_screen.approval.expired",
+                            CanonicalApprovalState::Consumed => { runtime_consumed = true; "room_screen.approval.consumed" },
+                        }
+                    });
+                }
+            }
+        }
+        if canonical_label.is_none() { canonical_label = Some("room_screen.approval.unavailable"); }
+    }
     let is_disabled = are_action_buttons_disabled(disabled_source_event_ids, source_event_id.as_ref())
         || !render_state.buttons_enabled;
     let selected_action = selected_actions.get(source_event_id);
@@ -845,15 +1049,17 @@ pub(super) fn populate_octos_action_buttons(
             .set_text(cx, &approval_card.title);
         item.label(cx, ids!(content.action_buttons.approval_request_view.approval_summary_label))
             .set_text(cx, &approval_card.summary);
-        item.label(cx, ids!(content.action_buttons.approval_request_view.approval_header.pending_badge.pending_label))
+        item.label(cx, ids!(content.action_buttons.approval_request_view.approval_header.approval_state_badge.approval_state_label))
             .set_text(cx, tr_key(
                 app_language,
-                if approval_card.expired {
+                canonical_label.unwrap_or(if approval_card.expired {
                     "room_screen.approval.expired"
                 } else {
                     "room_screen.approval.pending"
-                },
+                }),
             ));
+        item.label(cx, ids!(content.action_buttons.approval_request_view.approval_task_result_unknown_label))
+            .set_text(cx, if runtime_consumed { tr_key(app_language, "room_screen.approval.task_result_unknown") } else { "" });
     }
 
     // Dynamic action row: ONE Splash per message replaces the former pool of
@@ -885,12 +1091,16 @@ pub(super) fn populate_octos_action_buttons(
     active_splash.set_visible(cx, true);
     active_splash.set_text(
         cx,
-        &build_octos_actions_splash_body(&visible_slots, !is_disabled, source_event_id.as_str()),
+        &build_octos_actions_splash_body(&visible_slots, !is_disabled, source_event_id.as_str(), pane_uid, item.widget_uid()),
     );
 
     if !is_disabled {
         for (index, render_slot) in visible_slots.iter().enumerate() {
-            let request = if let Some(approval_request) = parsed_payload.approval_request.as_ref() {
+            let request = if let Some(agent) = public_agent {
+                OctosActionButtonRequest::OpenPendingApprovals {
+                    agent: agent.into(), project_room_id: room_id.clone(), label: render_slot.label.clone(),
+                }
+            } else if let Some(approval_request) = parsed_payload.approval_request.as_ref() {
                 OctosActionButtonRequest::Approval {
                     protocol: approval_request.protocol.clone(),
                     request_id: approval_request.request_id.clone(),
@@ -954,6 +1164,8 @@ pub(super) fn build_octos_actions_splash_body(
     slots: &[ActionButtonRenderSlot],
     enabled: bool,
     source_event_id: &str,
+    pane_uid: WidgetUid,
+    item_uid: WidgetUid,
 ) -> String {
     use std::fmt::Write;
     let mut body =
@@ -962,13 +1174,21 @@ pub(super) fn build_octos_actions_splash_body(
     for (index, slot) in slots.iter().enumerate() {
         let label = escape_splash_string(&slot.label);
         if enabled {
-            let _ = write!(
+            let widget_id = match slot.id.as_str() {
+                "approve_once" => "approval_approve_once_button".to_owned(),
+                "deny" => "approval_deny_button".to_owned(),
+                "view_pending_approvals" => "view_pending_approvals_button".to_owned(),
+                _ => format!("b{index}"),
+            };
+            let _ = writeln!(
                 body,
-                "b{index} := Button {{ text: \"{label}\" on_click: || {{ agent.notify(\"{event}\", {{source: \"{source}\", slot: {index}}}) }} }}\n",
+                "{widget_id} := Button {{ text: \"{label}\" on_click: || {{ agent.notify(\"{event}\", {{source: \"{source}\", slot: {index}, pane: \"{pane}\", item: \"{item}\"}}) }} }}",
                 event = OCTOS_SPLASH_NOTIFY_EVENT,
+                pane = pane_uid.0,
+                item = item_uid.0,
             );
         } else {
-            let _ = write!(body, "s{index} := Label {{ text: \"{label}\" }}\n");
+            let _ = writeln!(body, "s{index} := Label {{ text: \"{label}\" }}");
         }
     }
     body
@@ -978,6 +1198,7 @@ pub(super) fn build_octos_actions_splash_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_forward_menu() {
@@ -1106,6 +1327,8 @@ mod tests {
                 "request_id": "approval_0123456789abcdef0123456789abcdef",
                 "upstream_request_id": "turn-1:Bash",
                 "input_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "owner_mxid": "@owner:example.test",
+                "publisher_mxid": "@bridge:example.test",
                 "runtime": "codex",
                 "tool_name": "Bash",
                 "description": "Create a GitHub issue",
@@ -1117,6 +1340,147 @@ mod tests {
                 ]
             }
         })
+    }
+
+    fn old_builder_approval_content() -> serde_json::Value {
+        // Exact old buildOwnerApprovalRequest shape: no owner, publisher or
+        // canonical revision. Keep all required legacy detail/action fields.
+        serde_json::json!({
+            "msgtype": "com.agentchat.approval.request.v1",
+            "body": concat!("Approval required for test_agent\nProject: test_project\nRuntime: codex\nTool: Bash\n",
+                "Description: Inspect a local file\nInput: cat README.md\nExpires: 2026-07-22T18:40:00.000Z\n",
+                "Use the Approve once or Deny button. Text replies are not approval."),
+            "com.agentchat.approval": {
+                "version": 1, "kind": "request", "agent": TEST_AGENTCHAT_AGENT,
+                "project": TEST_AGENTCHAT_PROJECT, "project_room_id": TEST_AGENTCHAT_PROJECT_ROOM_ID,
+                "request_id": "approval_0123456789abcdef0123456789abcdef",
+                "upstream_request_id": "turn-1:Bash",
+                "input_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "runtime": "codex", "tool_name": "Bash", "description": "Inspect a local file",
+                "input_preview": "cat README.md", "expires_at": 1784745600000u64,
+                "actions": [
+                    { "id": "approve_once", "label": "Approve once", "style": "primary" },
+                    { "id": "deny", "label": "Deny", "style": "danger" }
+                ]
+            }
+        })
+    }
+
+    fn legacy_status_content(state: &str, decision: Option<&str>) -> serde_json::Value {
+        let original = old_builder_approval_content();
+        let detail = &original[AGENTCHAT_APPROVAL_EVENT_KEY];
+        serde_json::json!({
+            "msgtype": AGENTCHAT_APPROVAL_STATUS_MSGTYPE,
+            "com.agentchat.approval": {
+                "version":1, "kind":"status", "migration_kind":"legacy_v1", "revision":1,
+                "request_id":detail["request_id"], "agent":detail["agent"], "project":detail["project"],
+                "project_room_id":detail["project_room_id"], "input_digest":detail["input_digest"],
+                "owner_mxid":"@owner:example.test", "publisher_mxid":"@bridge:example.test",
+                "state":state, "decision":decision
+            },
+            "m.relates_to":{"m.in_reply_to":{"event_id":"$old-request"}}
+        })
+    }
+
+    #[test]
+    fn legacy_approval_old_builder_displays_readonly_state_in_both_orders() {
+        let original = old_builder_approval_content();
+        assert!(parse_agentchat_approval_request_from_content(&original).is_some());
+        let status = legacy_status_content("consumed", Some("allow"));
+        for status_first in [false, true] {
+            let mut session = ApprovalSession::default();
+            let events = if status_first { [(&status, "$status"), (&original, "$old-request")] }
+                else { [(&original, "$old-request"), (&status, "$status")] };
+            for (content, event) in events {
+                let _result = session.ingest_message("@owner:example.test", "!approval:example.test", event,
+                    "@bridge:example.test", content, 1000);
+            }
+            let view = session.approval("@owner:example.test", "!approval:example.test",
+                "approval_0123456789abcdef0123456789abcdef").unwrap();
+            assert!(view.legacy_read_only);
+            assert_eq!(view.decision, Some(crate::approval_state::ApprovalDecision::Allow));
+            assert!(!session.is_actionable("@owner:example.test", "!approval:example.test", &view.binding.request_id, 1000));
+            assert_eq!(legacy_approval_status_for_original(&view, "@owner:example.test", "!approval:example.test",
+                "$old-request", "@bridge:example.test", &original), Some(CanonicalApprovalState::Consumed));
+            for action in [ApprovalAction::ApproveOnce, ApprovalAction::Deny] {
+                assert!(session.try_claim(ApprovalClaimKey {
+                    account_mxid:"@owner:example.test".into(), approval_room_id:"!approval:example.test".into(),
+                    request_id:view.binding.request_id.clone(), input_digest:view.binding.input_digest.clone(),
+                }, action, 1000).is_err());
+            }
+        }
+    }
+
+    fn legacy_status_view(content: &serde_json::Value) -> ApprovalView {
+        let mut session = ApprovalSession::default();
+        assert!(matches!(session.ingest_message("@owner:example.test", "!approval:example.test", "$status",
+            "@bridge:example.test", content, 1000), crate::approval_state::IngestResult::Changed(_)));
+        session.approval("@owner:example.test", "!approval:example.test",
+            "approval_0123456789abcdef0123456789abcdef").unwrap()
+    }
+
+    #[test]
+    fn legacy_approval_display_rejects_mismatched_original_evidence() {
+        let original = old_builder_approval_content();
+        let status = legacy_status_content("consumed", Some("allow"));
+        let view = legacy_status_view(&status);
+        for (field, value) in [
+            ("request_id", "approval_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ("agent", "other_agent"), ("project", "other_project"),
+            ("project_room_id", "!other:example.test"),
+            ("input_digest", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ("owner_mxid", "@other:example.test"), ("publisher_mxid", "@other:example.test"),
+        ] {
+            let mut wrong = original.clone();
+            wrong[AGENTCHAT_APPROVAL_EVENT_KEY][field] = serde_json::json!(value);
+            assert_eq!(legacy_approval_status_for_original(&view, "@owner:example.test", "!approval:example.test",
+                "$old-request", "@bridge:example.test", &wrong), None, "must compare {field}");
+        }
+        for (account, room, event, sender) in [
+            ("@other:example.test", "!approval:example.test", "$old-request", "@bridge:example.test"),
+            ("@owner:example.test", "!other:example.test", "$old-request", "@bridge:example.test"),
+            ("@owner:example.test", "!approval:example.test", "$different", "@bridge:example.test"),
+            ("@owner:example.test", "!approval:example.test", "$old-request", "@other:example.test"),
+        ] {
+            assert_eq!(legacy_approval_status_for_original(&view, account, room, event, sender, &original), None);
+        }
+        let mut unproven = status.clone();
+        unproven.as_object_mut().unwrap().remove("m.relates_to");
+        assert_eq!(legacy_approval_status_for_original(&legacy_status_view(&unproven), "@owner:example.test",
+            "!approval:example.test", "$old-request", "@bridge:example.test", &original), None);
+        for field in ["m.new_content", "m.relates_to"] {
+            let mut edited = original.clone();
+            edited[field] = if field == "m.new_content" { original.clone() }
+                else { serde_json::json!({"rel_type":"m.replace", "event_id":"$old-request"}) };
+            assert_eq!(legacy_approval_status_for_original(&view, "@owner:example.test", "!approval:example.test",
+                "$old-request", "@bridge:example.test", &edited), None);
+        }
+        let mut session = ApprovalSession::default();
+        assert!(matches!(session.ingest_message("@owner:example.test", "!approval:example.test", "$forged",
+            "@other:example.test", &status, 1000), crate::approval_state::IngestResult::Rejected(_)),
+            "actual status sender must match publisher before any display proof");
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_legacy_approval_display_requires_exact_evidence(suffix in "[a-z0-9]{1,24}", field in 0usize..7) {
+            let mut original = old_builder_approval_content();
+            let view = legacy_status_view(&legacy_status_content("consumed", Some("allow")));
+            let mut account = "@owner:example.test".to_owned();
+            let mut room = "!approval:example.test".to_owned();
+            let mut event = "$old-request".to_owned();
+            let mut sender = "@bridge:example.test".to_owned();
+            match field {
+                0 => account = format!("@different_{suffix}:example.test"),
+                1 => room = format!("!different_{suffix}:example.test"),
+                2 => event = format!("$different_{suffix}"),
+                3 => sender = format!("@different_{suffix}:example.test"),
+                4 => original[AGENTCHAT_APPROVAL_EVENT_KEY]["agent"] = serde_json::json!(format!("different_{suffix}")),
+                5 => original[AGENTCHAT_APPROVAL_EVENT_KEY]["project"] = serde_json::json!(format!("different_{suffix}")),
+                _ => original[AGENTCHAT_APPROVAL_EVENT_KEY]["project_room_id"] = serde_json::json!(format!("!different_{suffix}:example.test")),
+            }
+            proptest::prop_assert_eq!(legacy_approval_status_for_original(&view, &account, &room, &event, &sender, &original), None);
+        }
     }
 
     #[test]
@@ -1687,5 +2051,73 @@ mod tests {
 
         clear_selected_octos_action(&mut selected_actions, source_event_id.as_ref());
         assert!(!selected_actions.contains_key(&source_event_id));
+    }
+
+    #[test]
+    fn approval_notification_requires_pane_and_item_ownership() {
+        let exact = serde_json::json!({
+            "pane": "41",
+            "item": "73",
+            "source": "$approval",
+            "slot": 1,
+        });
+        assert!(approval_action_notification_matches(
+            &exact, 41, 73, "$approval", 1,
+        ));
+
+        for changed in [
+            serde_json::json!({"pane":"42","item":"73","source":"$approval","slot":1}),
+            serde_json::json!({"pane":"41","item":"74","source":"$approval","slot":1}),
+            serde_json::json!({"pane":"41","item":"73","source":"$other","slot":1}),
+            serde_json::json!({"pane":"41","item":"73","source":"$approval","slot":0}),
+        ] {
+            assert!(!approval_action_notification_matches(
+                &changed, 41, 73, "$approval", 1,
+            ));
+        }
+    }
+
+    #[test]
+    fn public_notice_navigation_rejects_private_or_actionable_fields() {
+        let notice = serde_json::json!({
+            "msgtype": AGENTCHAT_APPROVAL_STATUS_MSGTYPE,
+            AGENTCHAT_APPROVAL_EVENT_KEY: {
+                "version": 1,
+                "kind": "status",
+                "state": "waiting_for_owner",
+                "agent": "worker",
+                "project": "demo",
+            },
+        });
+        assert_eq!(public_approval_notice_agent(&notice), Some("worker"));
+
+        for forbidden in ["request_id", "input_digest", "actions", "owner_mxid"] {
+            let mut unsafe_notice = notice.clone();
+            unsafe_notice[AGENTCHAT_APPROVAL_EVENT_KEY][forbidden] =
+                serde_json::json!("private");
+            assert_eq!(public_approval_notice_agent(&unsafe_notice), None);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_approval_notification_matches_all_owner_fields(
+            pane in 1u64..u64::MAX,
+            item in 1u64..u64::MAX,
+            slot in 0usize..MAX_OCTOS_ACTION_BUTTONS,
+        ) {
+            let payload = serde_json::json!({
+                "pane": pane.to_string(),
+                "item": item.to_string(),
+                "source": "$approval",
+                "slot": slot,
+            });
+            prop_assert!(approval_action_notification_matches(
+                &payload, pane, item, "$approval", slot,
+            ));
+            prop_assert!(!approval_action_notification_matches(
+                &payload, pane.saturating_add(1), item, "$approval", slot,
+            ));
+        }
     }
 }

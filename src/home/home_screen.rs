@@ -549,7 +549,7 @@ impl Widget for HomeScreen {
                 // the focused room can never open behind an overlay page.
                 if matches!(
                     action.as_widget_action().cast_ref(),
-                    RoomsListAction::Selected(_),
+                    RoomsListAction::Selected(_) | RoomsListAction::OpenPendingApprovals(_),
                 ) {
                     let next_selection = selection_after_opening_room(&app_state.selected_tab);
                     if next_selection != app_state.selected_tab {

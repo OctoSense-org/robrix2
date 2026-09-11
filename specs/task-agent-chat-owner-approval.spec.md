@@ -41,6 +41,8 @@ expiration, and one-shot state before releasing a coding-agent operation.
   prevents an approval click from becoming undecryptable when the bridge device
   was registered after an older room session was established.
 - Keep the existing `org.octos.approval_request` protocol backward compatible.
+- Custom room-message previews show only the HTML-escaped fallback body, never
+  the Rust debug representation or extra protocol fields.
 
 ## Boundaries
 
@@ -50,6 +52,8 @@ expiration, and one-shot state before releasing a coding-agent operation.
 - src/shared/mod.rs
 - src/home/room_screen.rs
 - src/sliding_sync.rs
+- src/event_preview.rs
+- proptest-regressions/event_preview.txt
 - resources/i18n/en.json
 - resources/i18n/zh-CN.json
 
@@ -68,6 +72,16 @@ expiration, and one-shot state before releasing a coding-agent operation.
 - Runtime permission policy and Matrix owner binding, which remain in agent-chat
 
 ## Completion Criteria
+
+### Rule: custom-preview — preview depends only on escaped fallback body
+
+Scenario: Custom message summaries do not expose protocol internals
+  Test: custom_message_preview_shows_escaped_body_without_protocol_details
+  Test: prop_custom_preview_depends_only_on_escaped_body
+  Given a custom room message with a fallback body and arbitrary extra fields
+  When text_preview_of_message creates a room or reply summary
+  Then the preview is exactly the HTML-escaped fallback body
+  And protocol fields and Rust debug output do not appear
 
 Scenario: Public project-room status is read-only
   Test: test_agentchat_public_status_has_no_actions

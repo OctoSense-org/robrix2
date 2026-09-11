@@ -133,7 +133,7 @@ script_mod! {
                 width: Fill,
                 height: Fill,
                 flow: Down,
-                max_pull_down: 0.0,
+                bounce_at_start: false,
 
                 section_header := mod.widgets.GlobalSearchSectionHeader {}
                 hit_row := mod.widgets.GlobalSearchHitRow {}

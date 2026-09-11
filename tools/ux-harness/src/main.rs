@@ -18,13 +18,16 @@
 //! See README.md for the full loop.
 
 mod driver;
+mod evidence;
 mod findings;
 mod frame;
 mod gate;
+mod locator;
 mod proto;
 mod rules_runtime;
 mod rules_static;
 mod scenes;
+mod studio;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +38,13 @@ use frame::{contrast_hex, contrast_ratio, parse_hex, relative_luminance};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("");
+    if mode == "studio" {
+        if let Err(error) = studio::run_cli(&args[2..]) {
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let mut repo = PathBuf::from(".");
     let mut app: Option<PathBuf> = None;
@@ -211,20 +221,26 @@ fn run(repo: &Path, app: Option<&Path>, out: &Path, gate_path: Option<&Path>) ->
         }
         Some(app_bin) => {
             let frames_dir = out.join("frames");
-            // Point the app at a throwaway HOME so an audit can never read or
-            // overwrite the developer's real Matrix session, and give the
-            // headless shader JIT its own cache directory (it shells out to
-            // rustc, so it needs the toolchain on PATH — inherited).
-            let home = out.join("home");
+            // Isolate application data without changing toolchain or OS homes.
+            let profile = out.join("profile");
             let jit = out.join("jit");
-            std::fs::create_dir_all(&home).map_err(|e| format!("create {}: {e}", home.display()))?;
+            std::fs::create_dir_all(&profile).map_err(|e| format!("create {}: {e}", profile.display()))?;
+            let profile = profile.canonicalize().map_err(|e| format!("resolve profile: {e}"))?;
             let env = vec![
-                ("HOME".to_string(), home.to_string_lossy().to_string()),
+                ("ROBRIX_DATA_DIR".to_string(), profile.to_string_lossy().to_string()),
                 ("MAKEPAD_HEADLESS_JIT_DIR".to_string(), jit.to_string_lossy().to_string()),
             ];
             let mut driver = driver::Driver::launch(app_bin, &frames_dir, &env)?;
-            driver.wait_for_startup()?;
-            let outcome = scenes::run_all(&mut driver, &frames_dir)?;
+            let result = driver.wait_for_startup().and_then(|()| scenes::run_all(&mut driver, &frames_dir));
+            let diagnostics = driver.diagnostic_text();
+            std::fs::write(out.join("app.log"), &diagnostics).map_err(|e| format!("write app diagnostics: {e}"))?;
+            let outcome = result.map_err(|error| {
+                let failure = format!("{error}\n\n{diagnostics}");
+                if let Err(write_error) = std::fs::write(out.join("failure.txt"), &failure) {
+                    return format!("{failure}\nwrite failure evidence: {write_error}");
+                }
+                failure
+            })?;
             driver.shutdown();
             all.extend(outcome.findings);
             scenes_run.extend(outcome.records);

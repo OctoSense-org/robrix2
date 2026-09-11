@@ -777,6 +777,14 @@ impl WidgetMatchEvent for MainDesktopUI {
                     // a redraw to be happening in order to draw the tab content.
                     self.focus_or_create_tab(cx, selected_room.clone());
                 }
+                RoomsListAction::OpenPendingApprovals(selected_room) => {
+                    self.focus_or_create_tab(cx, selected_room.clone());
+                    if let Some(widget) = self.tab_widget(cx, selected_room.tab_id()) {
+                        widget
+                            .as_room_screen()
+                            .show_latest_approval(cx, selected_room.room_id());
+                    }
+                }
                 RoomsListAction::InviteAccepted { room_name_id } => {
                     self.replace_invite_with_joined_room(cx, scope, room_name_id);
                 }

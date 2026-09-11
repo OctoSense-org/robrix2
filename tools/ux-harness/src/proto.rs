@@ -14,7 +14,7 @@
 //! We hand-write the subset instead of depending on `makepad_studio_protocol`
 //! so the harness stays a standalone binary that builds in seconds.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// Mouse button bits as makepad's `MouseButton::from_bits_retain` expects
@@ -28,6 +28,7 @@ pub const MOUSE_PRIMARY: u32 = 1;
 /// a UX scenario actually needs are mapped here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
+    A,
     Escape,
     Tab,
     Return,
@@ -42,6 +43,7 @@ pub enum Key {
 impl Key {
     pub fn wire_index(self) -> u32 {
         match self {
+            Key::A => 30,
             Key::Escape => 0,
             Key::Backspace => 15,
             Key::Tab => 16,
@@ -56,6 +58,7 @@ impl Key {
 
     pub fn parse(name: &str) -> Option<Key> {
         Some(match name.to_ascii_lowercase().as_str() {
+            "a" => Key::A,
             "escape" | "esc" => Key::Escape,
             "tab" => Key::Tab,
             "return" | "enter" => Key::Return,
@@ -190,14 +193,14 @@ impl Msg {
 /// parsers do not. `WidgetSnapshot` ends in four optional fields, so nearly
 /// every snapshot line needs this. Quoted strings are skipped so a comma
 /// inside a label is never touched.
-fn strip_trailing_commas(input: &str) -> String {
+pub(crate) fn strip_trailing_commas(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
+    let chars: Vec<char> = input.chars().collect();
     let mut in_string = false;
     let mut escaped = false;
     let mut i = 0;
-    while i < bytes.len() {
-        let c = bytes[i] as char;
+    while i < chars.len() {
+        let c = chars[i];
         if in_string {
             out.push(c);
             if escaped {
@@ -220,10 +223,10 @@ fn strip_trailing_commas(input: &str) -> String {
             // Look ahead past whitespace: a comma right before a closer is the
             // artifact we are removing.
             let mut j = i + 1;
-            while j < bytes.len() && (bytes[j] as char).is_ascii_whitespace() {
+            while j < chars.len() && chars[j].is_ascii_whitespace() {
                 j += 1;
             }
-            if j < bytes.len() && (bytes[j] == b'}' || bytes[j] == b']') {
+            if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
                 i += 1;
                 continue;
             }
@@ -237,7 +240,7 @@ fn strip_trailing_commas(input: &str) -> String {
 /// One widget as reported by makepad's `WidgetSnapshot`. This is the
 /// accessibility-tree-equivalent the harness reasons over: real post-layout
 /// geometry plus the semantics each widget chooses to expose.
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct WidgetSnapshot {
     pub id: String,
     pub widget_type: String,
@@ -282,9 +285,24 @@ pub enum Incoming {
     WidgetSnapshot { request_id: u64, widgets: Vec<WidgetSnapshot> },
     WidgetTreeDump { request_id: u64, dump: String },
     KeyFocusRect { x: Option<f64>, y: Option<f64>, width: Option<f64>, height: Option<f64> },
-    Screenshot { request_ids: Vec<u64>, width: u32, height: u32 },
+    Screenshot { request_ids: Vec<u64>, width: u32, height: u32, png: Vec<u8> },
     Log(String),
+    ProtocolError(String),
     Other(String),
+}
+
+#[derive(Deserialize)]
+struct SnapshotResponse {
+    request_id: u64,
+    widgets: Vec<WidgetSnapshot>,
+}
+
+#[derive(Deserialize)]
+struct ScreenshotResponse {
+    request_ids: Vec<u64>,
+    width: u32,
+    height: u32,
+    png: Vec<u8>,
 }
 
 /// Decode one stdout line. Unknown variants collapse to `Other` — makepad emits
@@ -295,14 +313,11 @@ pub fn decode(line: &str) -> Option<Incoming> {
     if line.is_empty() {
         return None;
     }
-    // A Screenshot response inlines the PNG as a JSON array of bytes, so the
-    // line can run to megabytes. We never read those bytes — the headless
-    // backend has already written the same frame to MAKEPAD_HEADLESS_OUT_DIR —
-    // so skip the parse entirely rather than burn time on it.
-    if line.len() > 64 * 1024 && line.starts_with("{\"Screenshot\"") {
-        return Some(Incoming::Screenshot { request_ids: Vec::new(), width: 0, height: 0 });
-    }
-    let v: Value = serde_json::from_str(&strip_trailing_commas(line)).ok()?;
+    let v: Value = match serde_json::from_str(&strip_trailing_commas(line)) {
+        Ok(value) => value,
+        Err(error) if line.starts_with('{') => return Some(Incoming::ProtocolError(format!("invalid Studio JSON: {error}"))),
+        Err(_) => return Some(Incoming::Log(line.to_string())),
+    };
     let obj = v.as_object()?;
     let (tag, body) = obj.iter().next()?;
     Some(match tag.as_str() {
@@ -310,13 +325,10 @@ pub fn decode(line: &str) -> Option<Incoming> {
         "AfterStartup" => Incoming::AfterStartup,
         "RequestAnimationFrame" => Incoming::RequestAnimationFrame,
         "WidgetSnapshot" => {
-            let inner = body.get(0)?;
-            let request_id = inner.get("request_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let widgets = inner
-                .get("widgets")
-                .and_then(|w| serde_json::from_value::<Vec<WidgetSnapshot>>(w.clone()).ok())
-                .unwrap_or_default();
-            Incoming::WidgetSnapshot { request_id, widgets }
+            match serde_json::from_value::<SnapshotResponse>(body.get(0).cloned().unwrap_or(Value::Null)) {
+                Ok(response) => Incoming::WidgetSnapshot { request_id: response.request_id, widgets: response.widgets },
+                Err(error) => Incoming::ProtocolError(format!("invalid WidgetSnapshot: {error}")),
+            }
         }
         "WidgetTreeDump" => {
             let inner = body.get(0)?;
@@ -336,19 +348,51 @@ pub fn decode(line: &str) -> Option<Incoming> {
             }
         }
         "Screenshot" => {
-            let inner = body.get(0)?;
-            let request_ids = inner
-                .get("request_ids")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_u64()).collect())
-                .unwrap_or_default();
-            Incoming::Screenshot {
-                request_ids,
-                width: inner.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                height: inner.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            match serde_json::from_value::<ScreenshotResponse>(body.get(0).cloned().unwrap_or(Value::Null)) {
+                Ok(response) => Incoming::Screenshot { request_ids: response.request_ids, width: response.width, height: response.height, png: response.png },
+                Err(error) => Incoming::ProtocolError(format!("invalid Screenshot: {error}")),
             }
         }
         "LogItem" => Incoming::Log(body.to_string()),
         other => Incoming::Other(other.to_string()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trailing_comma_cleanup_preserves_chinese() {
+        let input = "{\"text\":\"项目二，选择 agent\",}";
+        assert_eq!(strip_trailing_commas(input), "{\"text\":\"项目二，选择 agent\"}");
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_protocol_cleanup_preserves_text(text in ".{0,100}") {
+            let encoded = serde_json::json!({"text":text}).to_string();
+            proptest::prop_assert_eq!(strip_trailing_commas(&encoded), encoded);
+        }
+    }
+
+    #[test]
+    fn malformed_widget_snapshot_is_error() {
+        let message = decode(r#"{"WidgetSnapshot":[{"request_id":17,"widgets":{"invalid":true}}]}"#);
+        assert!(!matches!(message, Some(Incoming::WidgetSnapshot { .. })), "malformed data must not be accepted as an empty tree");
+        assert!(matches!(message, Some(Incoming::ProtocolError(_))));
+    }
+
+    #[test]
+    fn missing_snapshot_request_id_is_error() {
+        let message = decode(r#"{"WidgetSnapshot":[{"widgets":[]}]}"#);
+        assert!(!matches!(message, Some(Incoming::WidgetSnapshot { .. })), "missing request identity must not become zero");
+        assert!(matches!(message, Some(Incoming::ProtocolError(_))));
+    }
+
+    #[test]
+    fn valid_empty_widget_snapshot_is_preserved() {
+        let message = decode(r#"{"WidgetSnapshot":[{"request_id":17,"widgets":[]}]}"#);
+        assert!(matches!(message, Some(Incoming::WidgetSnapshot { request_id: 17, widgets }) if widgets.is_empty()));
+    }
 }

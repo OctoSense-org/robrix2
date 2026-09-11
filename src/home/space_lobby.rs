@@ -700,7 +700,7 @@ script_mod! {
         // The hierarchical tree list
         tree_list := PortalList {
             keep_invisible: false,
-            max_pull_down: 0.0,
+            bounce_at_start: false,
             auto_tail: false,
             width: Fill, height: Fill
             flow: Down,

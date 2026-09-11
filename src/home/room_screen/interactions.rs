@@ -439,8 +439,8 @@ impl RoomScreen {
         scope: &mut Scope,
     ) {
         // Splash-built action buttons report clicks via `agent.notify` from
-        // their isolate VM; the payload carries (source event id, slot index),
-        // which keys `octos_action_button_contexts`.
+        // their isolate VM. Bind the notification to the exact pane and current
+        // recycled item as well as the source event and slot.
         if let Some(clicked_context) = actions
             .iter()
             .find_map(|action| {
@@ -453,12 +453,19 @@ impl RoomScreen {
                 let parsed: serde_json::Value = serde_json::from_str(&payload).ok()?;
                 let source_event_id =
                     OwnedEventId::try_from(parsed.get("source")?.as_str()?).ok()?;
-                let slot = parsed.get("slot")?.as_u64()? as usize;
-                self.octos_action_button_contexts
-                    .get(&(source_event_id, slot))
-                    .cloned()
+                let slot = usize::try_from(parsed.get("slot")?.as_u64()?).ok()?;
+                let context = self.octos_action_button_contexts.get(&(source_event_id.clone(), slot))?;
+                approval_action_notification_matches(&parsed, self.widget_uid().0,
+                    context.item_widget_uid.0, source_event_id.as_str(), slot)
+                    .then(|| context.clone())
             })
         {
+            if let OctosActionButtonRequest::OpenPendingApprovals { agent, project_room_id, .. } = &clicked_context.request {
+                cx.action(AppStateAction::OpenPendingApprovals {
+                    agent: agent.clone(), project_room_id: project_room_id.clone(),
+                });
+                return;
+            }
             if clicked_context.request.is_expired(current_unix_time_millis()) {
                 mark_action_buttons_disabled(
                     &mut self.disabled_octos_action_source_event_ids,
@@ -481,6 +488,7 @@ impl RoomScreen {
             ) {
                 let Some(tl) = self.tl_state.as_ref() else { return };
                 let request = match &clicked_context.request {
+                    OctosActionButtonRequest::OpenPendingApprovals { .. } => return,
                     OctosActionButtonRequest::Generic { action_id, label, .. } => build_octos_action_response_request(
                         &tl.kind,
                         label,
@@ -516,17 +524,42 @@ impl RoomScreen {
                         }
                     }
                 };
+                let mut approval_claim = None;
+                let mut transaction_id = None;
+                if matches!(clicked_context.request, OctosActionButtonRequest::Approval {
+                    protocol: ApprovalProtocol::AgentChat { .. }, ..
+                }) {
+                    let (Some(account), Some(app_state)) = (current_user_id(), scope.data.get::<AppState>()) else { return };
+                    let Some((key, action)) = approval_claim_for_context(&clicked_context, &account, tl.kind.room_id()) else { return };
+                    let Ok(mut session) = app_state.approval_session.lock() else { return };
+                    let Ok(grant) = session.try_claim(key.clone(), action, current_unix_time_millis()) else {
+                        drop(session);
+                        self.invalidate_timeline_event_content(clicked_context.source_event_id.as_ref());
+                        self.redraw_timeline_list(cx);
+                        return;
+                    };
+                    transaction_id = Some(ruma::OwnedTransactionId::from(grant.transaction_id));
+                    approval_claim = Some(key);
+                    drop(session);
+                    cx.action(AppStateAction::ApprovalRoomStateChanged {
+                        account_mxid: account, room_id: tl.kind.room_id().clone(),
+                    });
+                }
                 mark_action_buttons_disabled(
                     &mut self.disabled_octos_action_source_event_ids,
                     &clicked_context.source_event_id,
                 );
-                mark_selected_octos_action(
-                    &mut self.selected_octos_action_by_source_event_id,
-                    &clicked_context.source_event_id,
-                    clicked_context.request.action_id(),
-                    clicked_context.request.label(),
-                    clicked_context.request.style(),
-                );
+                // Native approvals render only the canonical shared state. A
+                // local checkmark would incorrectly imply backend approval.
+                if approval_claim.is_none() {
+                    mark_selected_octos_action(
+                        &mut self.selected_octos_action_by_source_event_id,
+                        &clicked_context.source_event_id,
+                        clicked_context.request.action_id(),
+                        clicked_context.request.label(),
+                        clicked_context.request.style(),
+                    );
+                }
                 self.invalidate_timeline_event_content(
                     clicked_context.source_event_id.as_ref(),
                 );
@@ -537,6 +570,8 @@ impl RoomScreen {
                     target_user_id: request.target_user_id,
                     explicit_room: request.explicit_room,
                     source_event_id: request.source_event_id,
+                    approval_claim,
+                    transaction_id,
                 });
             }
             return;

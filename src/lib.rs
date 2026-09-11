@@ -38,12 +38,16 @@ pub fn view_from_live_ptr(
 
 /// The top-level main application module.
 pub mod app;
+mod data_directory;
+mod approval_discovery;
 /// Function for loading and saving persistent application/session state.
 pub mod persistence;
 /// The settings screen and settings-related content/widgets.
 pub mod settings;
 /// App-localized text and language preference definitions.
 pub mod i18n;
+/// Pure, account-scoped state for agent-chat approval projections.
+pub(crate) mod approval_state;
 
 /// Login screen
 pub mod login;
@@ -114,5 +118,15 @@ pub fn project_dir() -> &'static ProjectDirs {
 }
 
 pub fn app_data_dir() -> &'static Path {
-    project_dir().data_dir()
+    static DATA_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+    DATA_DIR.get_or_init(|| {
+        let override_dir = std::env::var_os("ROBRIX_DATA_DIR");
+        match data_directory::resolve_app_data_dir(override_dir.as_deref().map(Path::new), project_dir().data_dir()) {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("Robrix configuration error: {error}");
+                std::process::exit(2);
+            }
+        }
+    }).as_path()
 }

@@ -746,7 +746,7 @@ script_mod! {
                         visible: false
                         width: Fill
                         height: Fit
-                        flow: Flow.Right{wrap: true}
+                        flow: Down
                         spacing: 8.0
 
                         // Octos action buttons are built dynamically in this
@@ -925,7 +925,7 @@ script_mod! {
                         visible: false
                         width: Fill
                         height: Fit
-                        flow: Flow.Right{wrap: true}
+                        flow: Down
                         spacing: 8.0
 
                         // Octos action buttons are built dynamically in this

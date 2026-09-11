@@ -273,7 +273,7 @@ script_mod! {
         devices_list := PortalList {
             width: Fill, height: Fill
             keep_invisible: false
-            max_pull_down: 0.0
+            bounce_at_start: false
             auto_tail: false
             flow: Down
             grab_key_focus: false

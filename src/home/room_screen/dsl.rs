@@ -254,7 +254,7 @@ script_mod! {
             flow: Down
 
             auto_tail: true, // set to `true` to lock the view to the last item.
-            max_pull_down: 0.0, // set to `0.0` to disable the pulldown bounce animation.
+            bounce_at_start: false, // disable the pull-down bounce animation.
             // TODO: enable `reuse_items: true` once Makepad's Html/TextFlow widget
             //   properly resets all internal state during `script_apply(Reload)`.
             //   Currently, stale TextFlow layout state (particularly related to
