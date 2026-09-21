@@ -530,6 +530,12 @@ impl WidgetMatchEvent for MainDesktopUI {
         let mut should_save_dock_action: bool = false;
         for action in actions {
             let widget_action = action.as_widget_action();
+            if let Some(super::room_history::RoomHistoryAction::Jump {room, event}) = action.downcast_ref() {
+                let selected = SelectedRoom::JoinedRoom {room_name_id: room.clone()};
+                let tab = selected.tab_id();
+                self.focus_or_create_tab(cx, selected);
+                self.view.dock(cx, ids!(dock)).item(tab).as_room_screen().jump_to_history_event(cx, event.clone());
+            }
 
             if let Some(MainDesktopUiAction::CloseAllTabs { on_close_all }) = action.downcast_ref() {
                 self.close_all_tabs(cx);

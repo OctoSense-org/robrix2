@@ -28,7 +28,9 @@ cargo build --release --features agent_chat
 | **Agent message presentation.** Messages from `@ac_*` accounts get a badge after the sender name with the agent's workflow role (from its account name) and the message kind the bridge stamped (`📋` request, `↩️` reply, `ℹ️` info). The kind marker and the trailing `🔗 permalink` line are stripped from the body. | feature only | `src/agent_chat/presentation.rs`; hooks in `src/home/room_screen.rs` |
 | **Rooms-list previews.** Approval events are custom msgtypes, so without help they fall through ruma's `_Custom` arm and print `[Custom message]: CustomMessageContent { msgtype: ... }` into the rooms list. The bridge's human-readable `body` is shown instead. | feature only | `src/event_preview.rs` |
 | **Look and feel.** The card, buttons and badge follow robrix2's `RBX_*` design-token recipes (warning-tinted card, semantic-stroked buttons, accent badge). Upstream has no token layer, so `src/agent_chat/tokens.rs` defines just the tokens these surfaces use, with robrix2's values, under the same names — delete it if the full design system is ever ported. Typography keeps robrix2's sizes and weights on the theme fonts, since robrix2's custom font files are not shipped upstream. | feature only | `src/agent_chat/tokens.rs` |
-| **Settings toggle.** Settings → Preferences → "Agent-chat (experimental)". Persisted in `AppPreferences::agent_chat_enabled`. | feature only | `src/agent_chat/preferences.rs`, `src/settings/` |
+| **Settings and translations.** Desktop Preferences → Hagency; mobile Me → Settings → General → Hagency. One persisted workflow preference; English and Chinese labels. | feature only | `src/agent_chat/preferences.rs`, `src/settings/` |
+| **Long replies and streaming.** Expand/collapse long agent replies; receive MSC4357 live edits with Unicode-safe incremental reveal. | feature only | `src/agent_chat/reply.rs` |
+| **Scoped Agent Operations.** Encrypted bootstrap, pinned signed sessions, scoped projections, inspection and capability-bound commands. | `agent_ops_dev`; normal build awaits released producer contract | `src/agent_chat/ops/` |
 
 ## Security model
 
@@ -179,9 +181,59 @@ Manual checks against a running hagency stack (see hagency's
    `reviewer · reply` badge after the name, without the emoji or the trailing
    permalink line in the bubble.
 
-## Not yet ported from robrix2
+## Reply presentation and settings
 
-- Long-reply folding and the MSC4357 streaming animation for agent messages.
-- `com.hagency.agent_ops.*` client sessions (hagency still marks these as
-  development-only, and its namespace is still in flux).
-- Octos AppService and BotFather tooling, which is unrelated to hagency.
+Agent text/notice replies longer than eight lines or 1,200 graphemes collapse to
+three lines / 400 graphemes. Show more/less affects this Robrix view only: copying,
+forwarding and Matrix history retain the complete original body. Expansion is
+scoped by account, room and event and cleared on logout.
+
+The receiving side of [MSC4357](https://github.com/matrix-org/matrix-spec-proposals/pull/4357)
+recognizes `org.matrix.msc4357.live` in the effective content of a message/edit.
+It reveals graphemes progressively, updates the same message, suppresses the live
+edit badge, and restores formatted HTML when the final edit removes the marker.
+Old or stalled live messages stop animating after five minutes and remain readable.
+This does not add a live-draft sending mode.
+
+Mobile: **Me → Settings → General → Hagency**. Desktop: **Settings → Preferences →
+Hagency**. Both use the same persisted workflow-command preference. Labels, roles,
+approval buttons and descriptions support English and Simplified Chinese; wire
+identifiers, slash commands, agent text and approval decisions remain unchanged.
+
+## Scoped Agent Operations
+
+The client runtime and native panel are implemented under `src/agent_chat/ops`.
+The canonical producer contract is pinned to Hagency commit
+`4a8a8ac25e43e645345fc25987261e0d7a644fcd`; copied fixtures and their SHA-256 digests
+are checked before bootstrap. The producer's manifest still says `development`
+and has no released source commit. **Normal `agent_chat` builds keep the bootstrap
+gate closed**, as required by the producer. Existing chat and approvals work
+independently. **`cargo run --features agent_ops_dev`** explicitly enables the
+pinned development protocol for isolated same-host testing.
+
+An operator must enable the backend's router/thread/session flags, configure an
+explicit HTTP loopback origin, bind a project and owner approval room, and enroll
+the owner's actual Matrix device ID and public keys. Follow the pinned producer's
+[operator setup](https://github.com/hagency-org/hagency/blob/4a8a8ac25e43e645345fc25987261e0d7a644fcd/docs/AGENT-OPS-CLIENT.md).
+Enter the agent name, project/owner room IDs, bridge Matrix user ID, loopback origin
+and out-of-band server fingerprint in **Agent Operations**. The owner approval
+room must be encrypted with exactly the owner, bridge and agent as joined members.
+The backend enforces the authoritative agent identity and device enrollment.
+
+Robrix sends an encrypted `com.hagency.agent_ops.client_session.request.v1`, accepts
+only an encrypted grant from the configured bridge with the matching nonce and
+pinned Ed25519 signature, and exchanges it using proof of possession. HTTP requests
+use a separate client with no proxies or redirects and bounded responses. Dashboard
+bearer tokens never enter Robrix. Ephemeral keys and capabilities are held in memory;
+closing the panel, logout, expiry, account/membership change or request failure ends
+the local session. Reconnect and inspect the latest state after an ambiguous failure.
+
+The panel shows attention items, tasks, queue and workspaces. Only capabilities
+actually offered in the current scoped snapshot can be submitted. Cancel dispatch,
+mark workspace inspected, inspect outcome and resolve outcome all have explicit
+confirmation. Resolution offers only backend-authorized choices; notes are required,
+and Continue additionally requires recovery instructions. Scope, epoch, authorization
+fence, entity version, dirty generation and inspection bindings are preserved.
+Invalidation refreshes stale projections; commands are never automatically retried.
+
+Octos AppService and BotFather remain separate integrations.

@@ -49,6 +49,13 @@ use crate::{
 /// and to have something to immediately show when a user first opens a room.
 const PREPAGINATE_VISIBLE_ROOMS: bool = true;
 
+/// Lets an already-open room menu follow server-confirmed notification changes.
+#[derive(Clone, Debug)]
+pub struct RoomNotificationModeUpdated {
+    pub room_id: OwnedRoomId,
+    pub mode: Option<matrix_sdk::notification_settings::RoomNotificationMode>,
+}
+
 thread_local! {
     /// The list of all invited rooms, which is only tracked here
     /// because the backend doesn't need to track any info about them.
@@ -121,7 +128,7 @@ script_mod! {
                 color: (RBX_FG_SECONDARY),
                 text_style: REGULAR_TEXT {}
             }
-            text: "Loading rooms..."
+            text: #(crate::i18n::tr("Loading rooms...")) i18n_text: "Loading rooms..."
         }
     }
 
@@ -144,6 +151,7 @@ script_mod! {
 
             collapsible_header := CollapsibleHeader {}
             rooms_list_entry := RoomsListEntry {}
+            mobile_rooms_list_entry := MobileRoomsListEntry {}
             empty := View {}
             status_label := mod.widgets.RoomsListStatusLabel {}
             bottom_filler := View {
@@ -206,6 +214,10 @@ pub enum RoomsListUpdate {
     UpdateRoomAvatar {
         room_id: OwnedRoomId,
         room_avatar: FetchedRoomAvatar,
+    },
+    UpdateNotificationMode {
+        room_id: OwnedRoomId,
+        mode: Option<matrix_sdk::notification_settings::RoomNotificationMode>,
     },
     /// Update info about who invited us to the given room.
     UpdateInviterInfo {
@@ -325,6 +337,8 @@ impl ActionDefaultRef for RoomsListAction {
 pub struct LatestEventPreview {
     /// The Html-formatted preview text, which includes the sender's display name.
     pub text: String,
+    /// Same escaped message body without the redundant DM sender prefix.
+    pub direct_text: Option<String>,
     pub sender: Option<OwnedUserId>,
     pub timestamp: MilliSecondsSinceUnixEpoch,
 }
@@ -341,6 +355,7 @@ impl LatestEventPreview {
 /// and to filter the list of rooms based on the current search filter.
 #[derive(Debug)]
 pub struct JoinedRoomInfo {
+    pub notification_mode: Option<matrix_sdk::notification_settings::RoomNotificationMode>,
     /// The displayable name of this room (includes room ID for fallback).
     pub room_name_id: RoomNameId,
     /// The number of unread messages in this room.
@@ -574,6 +589,7 @@ impl ScriptHook for RoomsList {
 macro_rules! should_display_room {
     ($self:expr, $room_id:expr, $room:expr) => {
         !$self.hidden_rooms.contains($room_id)
+            && (!$self.display_filter.is_none() || !super::chat_actions::is_hidden($room_id))
             && ($self.display_filter)($room)
             && $self.selected_space.as_ref()
                 .is_none_or(|space| $self.is_room_indirectly_in_space(space.room_id(), $room_id))
@@ -714,7 +730,7 @@ impl RoomsList {
     }
 
     /// Handle all pending updates to the list of all rooms.
-    fn handle_rooms_list_updates(&mut self, cx: &mut Cx, _event: &Event, _scope: &mut Scope) {
+    fn handle_rooms_list_updates(&mut self, cx: &mut Cx) {
         let mut num_updates: usize = 0;
         let mut needs_sort = false;
         let mut searchable_metadata_changed = false;
@@ -722,6 +738,14 @@ impl RoomsList {
         while let Some(update) = PENDING_ROOM_UPDATES.pop() {
             num_updates += 1;
             match update {
+                RoomsListUpdate::UpdateNotificationMode {room_id, mode} => {
+                    if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
+                        if room.notification_mode != mode {
+                            room.notification_mode = mode;
+                            cx.action(RoomNotificationModeUpdated {room_id, mode});
+                        }
+                    }
+                }
                 RoomsListUpdate::AddInvitedRoom(invited_room) => {
                     let room_id = invited_room.room_name_id.room_id().clone();
                     let should_display = should_display_room!(self, &room_id, &invited_room);
@@ -734,6 +758,9 @@ impl RoomsList {
                     SignalToUI::set_ui_signal(); // signal the InviteScreen to update itself
                 }
                 RoomsListUpdate::AddJoinedRoom(joined_room) => {
+                    if let Some(latest) = &joined_room.latest {
+                        super::chat_actions::observe(joined_room.room_name_id.room_id(), latest.timestamp.0.into());
+                    }
                     let room_id = joined_room.room_name_id.room_id().clone();
                     let is_direct = joined_room.is_direct;
                     let num_unread_mentions = joined_room.num_unread_mentions;
@@ -850,11 +877,13 @@ impl RoomsList {
                     cx.action(InviteScreenAction::InviterInfoUpdated { room_id, inviter_info });
                 }
                 RoomsListUpdate::UpdateLatestEvent { room_id, latest } => {
+                    let restored = super::chat_actions::observe(&room_id, latest.timestamp.0.into());
                     if let Some(room) = self.all_joined_rooms.get_mut(&room_id) {
                         room.latest = Some(latest);
                     } else {
                         error!("Error: couldn't find room {room_id} to update latest event");
                     }
+                    if restored { self.update_displayed_rooms(cx, false); }
                 }
                 RoomsListUpdate::UpdateNumUnreadMessages { room_id, is_marked_unread, unread_messages, unread_mentions } => {
                     let is_displayed = self.displayed_joined_room_ids.contains(&room_id);
@@ -1134,6 +1163,12 @@ impl RoomsList {
                     }
                 }
                 RoomsListUpdate::ScrollToRoom(room_id) => {
+                    if !super::home_screen::effective_is_desktop(cx) {
+                        if let Some(index) = self.mobile_room_order().iter().position(|id| id == &room_id) {
+                            self.view.portal_list(cx, ids!(list)).smooth_scroll_to(cx, index, 50.0, Some(15), 10.0);
+                        }
+                        continue;
+                    }
                     // Ensure indexes are fresh in case rooms were added/removed in this batch of updates.
                     self.recalculate_indexes();
                     let portal_list = self.view.portal_list(cx, ids!(list));
@@ -1234,10 +1269,10 @@ impl RoomsList {
         let mut text = match (self.display_filter.is_none(), num_rooms) {
             (true, 0)  => "No joined or invited rooms found".to_string(),
             (true, 1)  => "Loaded 1 room".to_string(),
-            (true, n)  => format!("Loaded {n} rooms"),
+            (true, n)  => crate::i18n::format("Loaded {n} rooms", &[("n", (n).to_string())]),
             (false, 0) => "No matching rooms found".to_string(),
             (false, 1) => "Found 1 matching room".to_string(),
-            (false, n) => format!("Found {n} matching rooms"),
+            (false, n) => crate::i18n::format("Found {n} matching rooms", &[("n", (n).to_string())]),
         };
         match self.selected_space.is_some() {
             true => text.push_str(" in this space."),
@@ -1371,6 +1406,63 @@ impl RoomsList {
             direct_unread_mentions,
             direct_unread_messages,
         }
+    }
+
+    /// The mobile Chats root combines people and groups, preserving the SDK's
+    /// recency/favorite order and the current room filter. Desktop collapse state
+    /// must never hide a conversation on mobile.
+    fn mobile_room_order(&self) -> Vec<OwnedRoomId> {
+        let mut joined: Vec<_> = self.all_known_rooms_order.iter()
+            .filter(|id| self.displayed_joined_room_ids.contains(*id)).cloned().collect();
+        if let Some(sort) = self.sort_fn.as_ref() {
+            joined.sort_by(|a, b| sort(&self.all_joined_rooms[a], &self.all_joined_rooms[b]));
+        }
+        self.displayed_invited_rooms.iter().cloned().chain(joined).collect()
+    }
+
+    fn draw_mobile(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let rooms = self.mobile_room_order();
+        let show_status = rooms.is_empty();
+        let total = rooms.len() + usize::from(show_status);
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            if list.first_id() >= total {
+                list.set_first_id_and_scroll(0, 0.0);
+            }
+            list.set_item_range(cx, 0, total);
+            while let Some(index) = list.next_visible_item(cx) {
+                let Some(id) = rooms.get(index) else {
+                    if show_status && index == rooms.len() {
+                        let item = list.item(cx, index, id!(status_label));
+                        item.label(cx, ids!(label)).set_text(cx, &self.status);
+                        item.draw_all(cx, &mut Scope::empty());
+                    } else {
+                        list.item(cx, index, id!(bottom_filler)).draw_all(cx, &mut Scope::empty());
+                    }
+                    continue;
+                };
+                let desktop = super::home_screen::effective_is_desktop(cx);
+                let item = list.item(cx, index, if desktop {id!(rooms_list_entry)} else {id!(mobile_rooms_list_entry)});
+                if let Some(room) = self.all_joined_rooms.get_mut(id) {
+                    room.is_selected = desktop && self.current_active_room.as_ref().is_some_and(|r| r.room_id() == id);
+                    if !room.has_been_shown {
+                        room.has_been_shown = true;
+                        if PREPAGINATE_VISIBLE_ROOMS {
+                            submit_async_request(MatrixRequest::PaginateTimeline {
+                                timeline_kind: TimelineKind::MainRoom {room_id: id.clone()},
+                                num_events: 50, direction: PaginationDirection::Backwards,
+                            });
+                        }
+                        submit_async_request(MatrixRequest::FetchRoomAvatar {room_name_id: room.room_name_id.clone()});
+                    }
+                    item.draw_all(cx, &mut Scope::with_props(&*room));
+                } else if let Some(room) = self.invited_rooms.borrow_mut().get_mut(id) {
+                    room.is_selected = false;
+                    item.draw_all(cx, &mut Scope::with_props(&*room));
+                }
+            }
+        }
+        DrawStep::done()
     }
 
     /// Calculates the indexes in the PortalList where the headers and rooms should be drawn.
@@ -1518,7 +1610,7 @@ impl RoomsList {
             SpaceRoomListAction::LeaveSpaceResult { space_name_id, result } => match result {
                 Ok(()) => {
                     enqueue_popup_notification(
-                        format!("Successfully left space \"{}\".", space_name_id),
+                        crate::i18n::format("Successfully left space \"{0}\".", &[("0", (space_name_id).to_string())]),
                         PopupKind::Success,
                         Some(4.0),
                     );
@@ -1530,7 +1622,7 @@ impl RoomsList {
                 Err(e) => {
                     error!("Failed to leave space {space_name_id:?}: {e:?}");
                     enqueue_popup_notification(
-                        format!("Failed to leave space \"{space_name_id}\".\n\nError: {e}"),
+                        crate::i18n::format("Failed to leave space \"{space_name_id}\".\n\nError: {e}", &[("space_name_id", (space_name_id).to_string()), ("e", (e).to_string())]),
                         PopupKind::Error,
                         None,
                     );
@@ -1571,10 +1663,10 @@ impl RoomsList {
 }
 
 impl Widget for RoomsList {
-    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, _scope: &mut Scope) {
         // Process all pending updates to the list of all rooms, and then redraw it.
         if matches!(event, Event::Signal) {
-            self.handle_rooms_list_updates(cx, event, scope);
+            self.handle_rooms_list_updates(cx);
         }
 
         // First, we handle any actions that came from widgets within the room list,
@@ -1612,6 +1704,7 @@ impl Widget for RoomsList {
                     continue;
                 };
                 let details = RoomContextMenuDetails {
+                    notification_mode: jr.notification_mode,
                     room_name_id: jr.room_name_id.clone(),
                     is_favorite: jr.tags.contains_key(&TagName::Favorite),
                     is_low_priority: jr.tags.contains_key(&TagName::LowPriority),
@@ -1651,11 +1744,20 @@ impl Widget for RoomsList {
                 }
                 self.redraw(cx);
             }
+            else if action.downcast_ref::<super::chat_actions::ChatSwipeOpened>().is_some()
+                || action.downcast_ref::<super::chat_actions::ChatVisibilityChanged>().is_some()
+                || action.downcast_ref::<crate::app::ConfirmDeleteAction>().is_some()
+            {
+                cx.extend_actions(vec![action]);
+            }
         }
 
         // Second, handle any other actions that came from other widgets/components.
         if let Event::Actions(actions) = event {
             for action in actions {
+                if action.downcast_ref::<super::chat_actions::ChatVisibilityChanged>().is_some() {
+                    self.update_displayed_rooms(cx, false);
+                }
                 if let Some(AppStateAction::RoomFocused(selected_room)) = action.downcast_ref() {
                     self.set_current_active_room(cx, Some(selected_room.clone()));
                     continue;
@@ -1829,7 +1931,7 @@ impl Widget for RoomsList {
                     }
                     Some(MatrixLinkAction::Error(err)) => {
                         enqueue_popup_notification(
-                            format!("Failed to generate link: {}", err),
+                            crate::i18n::format("Failed to generate link: {0}", &[("0", (err).to_string())]),
                             PopupKind::Error,
                             Some(5.0),
                         );
@@ -1847,10 +1949,17 @@ impl Widget for RoomsList {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        // Cached/adaptive lists can be instantiated after the signal announcing
+        // a sync update. Consume queued data before the first visible frame too.
+        self.handle_rooms_list_updates(cx);
         let app_state = scope.data.get_mut::<AppState>().unwrap();
         // Update the currently-selected room from the AppState data.
         if self.current_active_room != app_state.selected_room {
             self.current_active_room = app_state.selected_room.clone();
+        }
+
+        if self.selected_space.is_none() || !super::home_screen::effective_is_desktop(cx) {
+            return self.draw_mobile(cx, scope, walk);
         }
 
         // Based on the various displayed room lists and is_expanded state of each room header,
@@ -2021,6 +2130,20 @@ impl Widget for RoomsList {
 }
 
 impl RoomsListRef {
+    pub fn latest_timestamp(&self, room: &OwnedRoomId) -> u64 {
+        self.borrow().and_then(|s| s.all_joined_rooms.get(room).and_then(|r| r.latest.as_ref()).map(|e| e.timestamp.0.into())).unwrap_or(0)
+    }
+    /// Joined, loaded conversations available to the mini-app share picker.
+    pub fn mini_app_share_rooms(&self) -> Vec<RoomNameId> {
+        let Some(inner) = self.borrow() else { return Vec::new(); };
+        let mut rooms: Vec<_> = inner.all_joined_rooms.values()
+            .filter(|room| !room.is_tombstoned)
+            .filter(|room| crate::sliding_sync::get_client().and_then(|c|c.get_room(room.room_name_id.room_id())).is_none_or(|r|!crate::moments::is_moments(&r)))
+            .map(|room| room.room_name_id.clone()).collect();
+        rooms.sort_by_key(|room| (room.display().to_lowercase(), room.room_id().clone()));
+        rooms
+    }
+
     /// See [`RoomsList::all_rooms_loaded()`].
     pub fn all_rooms_loaded(&self) -> bool {
         let Some(inner) = self.borrow() else { return false; };
@@ -2035,6 +2158,11 @@ impl RoomsListRef {
     /// See [`RoomsList::get_room_state()`].
     pub fn get_room_state(&self, room_id: &OwnedRoomId) -> Option<RoomState> {
         self.borrow()?.get_room_state(room_id)
+    }
+
+    /// Whether a loaded joined room is marked as a direct conversation.
+    pub fn is_direct_room(&self, room_id: &OwnedRoomId) -> Option<bool> {
+        self.borrow()?.all_joined_rooms.get(room_id).map(|room| room.is_direct)
     }
 
     /// Returns the avatar for the given room, if it is known and fetched.

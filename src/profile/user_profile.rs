@@ -7,6 +7,7 @@ use crate::{
     avatar_cache, block_user_modal::{BlockUserModalAction, BlockUserRequest}, shared::{avatar::{AvatarState, AvatarWidgetExt}, popup_list::{PopupKind, enqueue_popup_notification}}, sliding_sync::{MatrixRequest, current_user_id, is_user_blocked, submit_async_request}, utils
 };
 use super::user_profile_cache;
+use crate::shared::navigation_bar_button::NavigationBarButtonWidgetExt;
 
 
 /// Information retrieved about a user: their displayable name, ID, and known avatar state.
@@ -105,7 +106,7 @@ script_mod! {
                     color: #000,
                     text_style: USERNAME_TEXT_STYLE { font_size: 12 },
                 }
-                text: "User Name"
+                text: #(crate::i18n::tr("User Name"))
             }
 
             user_id := Label {
@@ -116,7 +117,7 @@ script_mod! {
                     color: (MESSAGE_TEXT_COLOR),
                     text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
                 }
-                text: "User ID"
+                text: #(crate::i18n::tr("User ID"))
             }
         }
 
@@ -137,7 +138,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE { font_size: 11.5 },
                     color: #000
                 }
-                text: "Membership in this room"
+                text: #(crate::i18n::tr("Membership in this room")) i18n_text: "Membership in this room"
             }
 
             membership_status_label := Label {
@@ -148,7 +149,7 @@ script_mod! {
                     color: (MESSAGE_TEXT_COLOR),
                     text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
                 }
-                text: "Unknown"
+                text: #(crate::i18n::tr("Unknown"))
             }
 
             role_info_label := Label {
@@ -159,7 +160,7 @@ script_mod! {
                     color: (MESSAGE_TEXT_COLOR),
                     text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
                 }
-                text: "Unknown"
+                text: #(crate::i18n::tr("Unknown"))
             }
         }
 
@@ -178,7 +179,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE { font_size: 11.5 },
                     color: #000
                 }
-                text: "Actions"
+                text: #(crate::i18n::tr("Actions")) i18n_text: "Actions"
             }
 
             direct_message_button := RobrixIconButton {
@@ -186,15 +187,16 @@ script_mod! {
                 padding: Inset{top: 10, bottom: 10, left: 12, right: 15}
                 draw_icon.svg: (mod.widgets.ICON_DOUBLE_CHAT)
                 icon_walk: Walk{width: 22, height: 16, margin: Inset{left: -5, right: -3, top: 1, bottom: -1} }
-                text: "Direct Message"
+                text: #(crate::i18n::tr("Direct Message")) i18n_text: "Direct Message"
             }
 
+            profile_moments := RobrixNeutralIconButton {text: #(crate::i18n::tr("Moments")) i18n_text: "Moments" draw_icon.svg: ICON_GLOBE icon_walk: Walk{width: 20 height: 20}}
             copy_link_to_user_button := RobrixNeutralIconButton {
                 padding: Inset{top: 10, bottom: 10, left: 12, right: 15}
                 margin: 0,
                 draw_icon.svg: (ICON_COPY)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -1, right: -1} }
-                text: "Copy Link to User"
+                text: #(crate::i18n::tr("Copy Link to User")) i18n_text: "Copy Link to User"
             }
 
             jump_to_read_receipt_button := RobrixNeutralIconButton {
@@ -202,7 +204,7 @@ script_mod! {
                 margin: 0,
                 draw_icon.svg: (ICON_JUMP)
                 icon_walk: Walk{width: 14, height: 16, margin: Inset{left: -1, right: 1.5}}
-                text: "Jump to Read Receipt"
+                text: #(crate::i18n::tr("Jump to Read Receipt")) i18n_text: "Jump to Read Receipt"
             }
 
             block_user_button := RobrixNegativeIconButton {
@@ -210,7 +212,7 @@ script_mod! {
                 margin: 0,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -0.5} }
-                text: "Block User"
+                text: #(crate::i18n::tr("Block User")) i18n_text: "Block User"
             }
         }
 
@@ -245,6 +247,34 @@ script_mod! {
             draw_bg.color: (COLOR_PRIMARY)
 
             user_profile_view := UserProfileView { }
+
+            mobile_profile := SolidView {
+                visible: false width: Fill height: Fill flow: Down draw_bg.color: #xededed
+                ScrollYView {
+                    width: Fill height: Fill flow: Down
+                    mp_card := DetailContactCard {}
+                    DetailGap {}
+                    DetailSection {
+                        mp_moments := DetailRow {title.text: #(crate::i18n::tr("Moments")) title.i18n_text: "Moments"}
+                        DetailDivider {}
+                        mp_copy := DetailRow {title.text: #(crate::i18n::tr("Copy Profile Link")) title.i18n_text: "Copy Profile Link"}
+                        DetailDivider {}
+                        mp_receipt := DetailRow {title.text: #(crate::i18n::tr("Last Read Message")) title.i18n_text: "Last Read Message"}
+                    }
+                    DetailGap {}
+                    DetailSection {
+                        mp_room := DetailRow {title.text: #(crate::i18n::tr("Chat")) title.i18n_text: "Chat" chevron.visible: false}
+                        DetailDivider {}
+                        mp_membership := DetailRow {title.text: #(crate::i18n::tr("Membership")) title.i18n_text: "Membership" chevron.visible: false}
+                        DetailDivider {}
+                        mp_role := DetailRow {title.text: #(crate::i18n::tr("Role")) title.i18n_text: "Role" chevron.visible: false}
+                    }
+                    DetailGap {}
+                    DetailSection {mp_message := DetailAction {title.text: #(crate::i18n::tr("Messages")) title.i18n_text: "Messages"}}
+                    DetailGap {}
+                    mp_block_section := DetailSection {mp_block := DetailAction {title +: {text: #(crate::i18n::tr("Block")) i18n_text: "Block" draw_text.color: #xfa5151}}}
+                }
+            }
 
             // The "X" close button on the top left
             close_button := RobrixNeutralIconButton {
@@ -322,34 +352,34 @@ impl DerefMut for UserProfilePaneInfo {
 impl UserProfilePaneInfo {
     fn membership_title(&self) -> String {
         if self.room_name.is_empty() {
-            format!("Membership in Room {}", self.room_id.as_str())
+            crate::i18n::format("Membership in Room {0}", &[("0", (self.room_id.as_str()).to_string())])
         } else {
-            format!("Membership in {}", self.room_name)
+            crate::i18n::format("Membership in {0}", &[("0", (self.room_name).to_string())])
         }
     }
 
     fn membership_status(&self) -> &str {
         self.room_member.as_ref().map_or(
-            "Not a Member",
+            crate::i18n::tr("Not a Member"),
             |member| match member.membership() {
-                MembershipState::Join => "Status: Joined",
-                MembershipState::Leave => "Status: Left",
-                MembershipState::Ban => "Status: Banned",
-                MembershipState::Invite => "Status: Invited",
-                MembershipState::Knock => "Status: Knocking",
-                _ => "Status: Unknown",
+                MembershipState::Join => crate::i18n::tr("Status: Joined"),
+                MembershipState::Leave => crate::i18n::tr("Status: Left"),
+                MembershipState::Ban => crate::i18n::tr("Status: Banned"),
+                MembershipState::Invite => crate::i18n::tr("Status: Invited"),
+                MembershipState::Knock => crate::i18n::tr("Status: Knocking"),
+                _ => crate::i18n::tr("Status: Unknown"),
             }
         )
     }
 
     fn role_in_room(&self) -> Cow<'_, str> {
         self.room_member.as_ref().map_or(
-            "Role: Unknown".into(),
+            crate::i18n::tr("Role: Unknown").into(),
             |member| match member.suggested_role_for_power_level() {
-                RoomMemberRole::Creator => "Role: Creator".into(),
-                RoomMemberRole::Administrator => "Role: Admin".into(),
-                RoomMemberRole::Moderator => "Role: Moderator".into(),
-                RoomMemberRole::User => "Role: Standard User".into(),
+                RoomMemberRole::Creator => crate::i18n::tr("Role: Creator").into(),
+                RoomMemberRole::Administrator => crate::i18n::tr("Role: Admin").into(),
+                RoomMemberRole::Moderator => crate::i18n::tr("Role: Moderator").into(),
+                RoomMemberRole::User => crate::i18n::tr("Role: Standard User").into(),
             }
         )
     }
@@ -477,26 +507,39 @@ impl Widget for UserProfileSlidingPane {
         let Some(info) = self.info.as_ref() else { return };
 
         if let Event::Actions(actions) = event {
-            if self.button(cx, ids!(direct_message_button)).clicked(actions) {
+            if self.button(cx, ids!(profile_moments)).clicked(actions) || self.view.navigation_bar_button(cx, ids!(mp_moments)).clicked(actions) {
+                cx.action(crate::moments::ui::MomentsAction::Open {author: Some(info.user_id.clone())});
+            }
+            if self.button(cx, ids!(direct_message_button)).clicked(actions)
+                || self.view.navigation_bar_button(cx, ids!(mp_message)).clicked(actions) {
                 submit_async_request(MatrixRequest::OpenOrCreateDirectMessage {
                     user_profile: info.user_profile.clone(),
                     // Don't just create a new DM room; we want to first get confirmation from the user.
                     allow_create: false,
                 });
+                if !crate::home::home_screen::effective_is_desktop(cx) {
+                    self.is_animating_out = true;
+                    cx.revert_key_focus();
+                    self.animator_play(cx, ids!(panel.hide));
+                    self.redraw(cx);
+                    return;
+                }
             }
 
-            if self.button(cx, ids!(copy_link_to_user_button)).clicked(actions) {
+            if self.button(cx, ids!(copy_link_to_user_button)).clicked(actions)
+                || self.view.navigation_bar_button(cx, ids!(mp_copy)).clicked(actions) {
                 let matrix_to_uri = info.user_id.matrix_to_uri().to_string();
                 cx.copy_to_clipboard(&matrix_to_uri);
                 enqueue_popup_notification(
-                    "Copied User ID to the clipboard.",
+                    crate::i18n::tr("Copied User ID to the clipboard."),
                     PopupKind::Success,
                     Some(3.0),
                 );
             }
 
             // Handle the jump to read receipt button being clicked, which is mostly handled by the room screen.
-            if !self.is_animating_out && self.button(cx, ids!(jump_to_read_receipt_button)).clicked(actions) {
+            if !self.is_animating_out && (self.button(cx, ids!(jump_to_read_receipt_button)).clicked(actions)
+                || self.view.navigation_bar_button(cx, ids!(mp_receipt)).clicked(actions)) {
                 cx.widget_action(
                     self.widget_uid(),
                     UserProfilePaneAction::JumpToReadReceipt(info.user_id.clone()),
@@ -509,7 +552,8 @@ impl Widget for UserProfileSlidingPane {
                 return;
             }
 
-            if !self.is_animating_out && self.button(cx, ids!(block_user_button)).clicked(actions) {
+            if !self.is_animating_out && (self.button(cx, ids!(block_user_button)).clicked(actions)
+                || self.view.navigation_bar_button(cx, ids!(mp_block)).clicked(actions)) {
                 let request = BlockUserRequest {
                     user_id: info.user_id.clone(),
                     display_name: info.username.clone(),
@@ -535,12 +579,17 @@ impl Widget for UserProfileSlidingPane {
 
         // Use the `slide` value to position main_content.
         // slide=0.0 means fully shown; slide=1.0 means fully hidden (off-screen right).
-        let panel_width = 300.0;
-        let right_margin = -(self.slide * panel_width);
+        let mobile = !crate::home::home_screen::effective_is_desktop(cx);
+        let panel_width = if mobile { cx.turtle().size().x } else { 300.0 };
+        let right_margin = -(f64::from(self.slide) * panel_width);
         let mut main_content = self.view(cx, ids!(main_content));
         script_apply_eval!(cx, main_content, {
+            width: #(panel_width)
             margin.right: #(right_margin)
         });
+        self.view(cx, ids!(mobile_profile)).set_visible(cx, mobile);
+        self.view(cx, ids!(user_profile_view)).set_visible(cx, !mobile);
+        self.button(cx, ids!(close_button)).set_visible(cx, !mobile);
         // Also derive the bg_view overlay alpha from `slide`.
         // The animator can only interpolate struct fields, not child view properties,
         // so we compute the bg color here from the smoothly-animated `slide` value.
@@ -554,6 +603,11 @@ impl Widget for UserProfileSlidingPane {
         // Set the user name, using the user ID as a fallback.
         self.label(cx, ids!(user_name)).set_text(cx, info.displayable_name());
         self.label(cx, ids!(user_id)).set_text(cx, info.user_id.as_str());
+        self.label(cx, ids!(mp_card.name)).set_text(cx, info.displayable_name());
+        self.label(cx, ids!(mp_card.user_id)).set_text(cx, &crate::i18n::format("Matrix ID: {0}", &[("0", (info.user_id).to_string())]));
+        self.label(cx, ids!(mp_room.value)).set_text(cx, &info.room_name);
+        self.label(cx, ids!(mp_membership.value)).set_text(cx, info.membership_status().trim_start_matches(crate::i18n::tr("Status: ")));
+        self.label(cx, ids!(mp_role.value)).set_text(cx, info.role_in_room().trim_start_matches(crate::i18n::tr("Role: ")));
 
         // Set the avatar image, using the user name as a fallback.
         let avatar_ref = self.avatar(cx, ids!(avatar));
@@ -561,6 +615,10 @@ impl Widget for UserProfileSlidingPane {
             .image()
             .and_then(|image| avatar_ref.show_image(cx, None, |cx, img| utils::load_avatar_image(&img, cx, image)).ok())
             .unwrap_or_else(|| avatar_ref.show_text(cx, None, None, info.displayable_name()));
+        let mobile_avatar = self.avatar(cx, ids!(mp_card.avatar));
+        info.avatar_state.image()
+            .and_then(|image| mobile_avatar.show_image(cx, None, |cx, img| utils::load_avatar_image(&img, cx, image)).ok())
+            .unwrap_or_else(|| mobile_avatar.show_text(cx, None, None, info.displayable_name()));
 
         // Set the membership status and role in the room.
         self.label(cx, ids!(membership_title_label)).set_text(cx, &info.membership_title());
@@ -568,8 +626,7 @@ impl Widget for UserProfileSlidingPane {
         self.label(cx, ids!(role_info_label)).set_text(cx, info.role_in_room().as_ref());
 
         // Draw and show/hide the buttons according to user and room membership info:
-        // * `direct_message_button` is hidden if the user is the same as the account user,
-        //    since you cannot direct message yourself.
+        // * The own-profile message action opens a separate private File Transfer room.
         // * `copy_link_to_user_button` is always enabled with the same text.
         // * `jump_to_read_receipt_button` is always shown with the same text.
         // * `block_user_button` is hidden if the user is the same as the account user,
@@ -579,16 +636,21 @@ impl Widget for UserProfileSlidingPane {
             .map(|rm| rm.is_account_user())
             .unwrap_or_else(|| current_user_id().is_some_and(|uid| uid == info.user_id));
 
-        self.button(cx, ids!(direct_message_button)).set_visible(cx, !is_pane_showing_current_account);
+        self.button(cx, ids!(direct_message_button)).set_visible(cx, true);
+        self.button(cx, ids!(direct_message_button)).set_text(cx, if is_pane_showing_current_account {crate::i18n::tr("File Transfer")} else {crate::i18n::tr("Direct Message")});
 
         let block_user_button = self.button(cx, ids!(block_user_button));
         block_user_button.set_visible(cx, !is_pane_showing_current_account);
         // Unfortunately the Matrix SDK's RoomMember type does not properly track
         // the blocked state of a user, so we have to maintain it separately.
         let is_blocked = is_user_blocked(&info.user_id);
+        self.view.widget(cx, ids!(mp_message)).set_visible(cx, true);
+        self.label(cx, ids!(mp_message.title)).set_text(cx, if is_pane_showing_current_account {crate::i18n::tr("File Transfer")} else {crate::i18n::tr("Messages")});
+        self.view.widget(cx, ids!(mp_block_section)).set_visible(cx, !is_pane_showing_current_account);
+        self.label(cx, ids!(mp_block.title)).set_text(cx, if is_blocked { crate::i18n::tr("Unblock") } else { crate::i18n::tr("Block") });
         block_user_button.set_text(
             cx,
-            if is_blocked { "Unblock User" } else { "Block User" }
+            if is_blocked { crate::i18n::tr("Unblock User") } else { crate::i18n::tr("Block User") }
         );
 
         self.view.draw_walk(cx, scope, walk)
@@ -668,6 +730,15 @@ impl UserProfileSlidingPane {
 }
 
 impl UserProfileSlidingPaneRef {
+    /// Close the mobile detail page without popping its underlying chat.
+    pub fn dismiss(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.is_animating_out = true;
+            cx.revert_key_focus();
+            inner.animator_play(cx, ids!(panel.hide));
+            inner.redraw(cx);
+        }
+    }
     /// See [`UserProfileSlidingPane::is_currently_shown()`]
     pub fn is_currently_shown(&self, cx: &mut Cx) -> bool {
         let Some(inner) = self.borrow() else { return false };

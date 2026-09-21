@@ -24,7 +24,7 @@ script_mod! {
                 align: Align{x: 0.5, y: 0.5}
                 padding: 15,
                 icon_walk: Walk{width: 0, height: 0, margin: 0}
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             accept_button := RobrixPositiveIconButton {
@@ -32,7 +32,7 @@ script_mod! {
                 align: Align{x: 0.5, y: 0.5}
                 padding: 15,
                 icon_walk: Walk{width: 0, height: 0, margin: 0}
-                text: "Confirm"
+                text: #(crate::i18n::tr("Confirm")) i18n_text: "Confirm"
             }
         }
     }
@@ -197,11 +197,11 @@ impl ConfirmationModal {
         self.view.label(cx, ids!(body)).set_text(cx, &self.content.body_text);
         self.view.button(cx, ids!(accept_button)).set_text(
             cx,
-            self.content.accept_button_text.as_deref().unwrap_or("Confirm"),
+            self.content.accept_button_text.as_deref().unwrap_or(crate::i18n::tr("Confirm")),
         );
         self.view.button(cx, ids!(cancel_button)).set_text(
             cx,
-            self.content.cancel_button_text.as_deref().unwrap_or("Cancel"),
+            self.content.cancel_button_text.as_deref().unwrap_or(crate::i18n::tr("Cancel")),
         );
 
         self.view.button(cx, ids!(cancel_button)).reset_hover(cx);

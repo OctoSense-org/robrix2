@@ -1,7 +1,14 @@
 use makepad_widgets::ScriptVm;
 
+pub mod mobile;
+pub mod mobile_chat_info;
 pub mod account_menu;
 pub mod add_room;
+pub(crate) mod back_swipe;
+pub mod chat_actions;
+pub mod room_history;
+pub mod joined_spaces;
+mod room_directory;
 pub mod edited_indicator;
 pub mod editing_pane;
 pub mod event_source_modal;
@@ -34,6 +41,10 @@ pub mod room_image_viewer;
 pub mod upload_progress;
 
 pub fn script_mod(vm: &mut ScriptVm) {
+    room_history::script_mod(vm);
+    mobile::script_mod(vm);
+    joined_spaces::script_mod(vm);
+    mobile_chat_info::script_mod(vm);
     search_messages::script_mod(vm);
     loading_pane::script_mod(vm);
     location_preview::script_mod(vm);

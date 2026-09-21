@@ -35,7 +35,7 @@ script_mod! {
         main_content := mod.widgets.ContextMenuContent {
             retry_send_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_ROTATE_CW) }
-                text: "Retry Sending"
+                text: #(crate::i18n::tr("Retry Sending")) i18n_text: "Retry Sending"
             }
 
             divider_after_retry := mod.widgets.ContextMenuDivider { }
@@ -48,7 +48,7 @@ script_mod! {
 
                 react_button := mod.widgets.ContextMenuButton {
                     draw_icon +: { svg: (ICON_ADD_REACTION) }
-                    text: "Add Reaction"
+                    text: #(crate::i18n::tr("Add Reaction")) i18n_text: "Add Reaction"
                 }
 
                 reaction_input_view := View {
@@ -71,9 +71,10 @@ script_mod! {
                         // so we just make the TextInput non-wrap.
                         flow: Flow.Right{wrap: false}, // do not wrap
                         draw_bg.border_size: 0.0
-                        empty_text: "Enter reaction..."
+                        empty_text: #(crate::i18n::tr("Enter reaction...")) i18n_empty_text: "Enter reaction..."
                     }
                     reaction_send_button := RobrixPositiveIconButton {
+                        enabled: false,
                         height: #(BUTTON_HEIGHT)
                         align: Align{x: 0.5, y: 0.5}
                         padding: Inset{left: 10, right: 10, top: 8, bottom: 8}
@@ -87,13 +88,17 @@ script_mod! {
             reply_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_REPLY) }
                 icon_walk +: { margin: Inset{top: 1} }
-                text: "Reply"
+                text: #(crate::i18n::tr("Reply")) i18n_text: "Reply"
             }
 
             reply_in_thread_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_REPLY_IN_THREAD) }
                 icon_walk +: { margin: Inset{top: 1} }
-                text: "Reply In Thread"
+                text: #(crate::i18n::tr("Reply In Thread")) i18n_text: "Reply In Thread"
+            }
+            forward_button := mod.widgets.ContextMenuButton {
+                draw_icon.svg: ICON_SEND
+                text: #(crate::i18n::tr("Select / Forward")) i18n_text: "Select / Forward"
             }
 
             divider_after_react_reply := mod.widgets.ContextMenuDivider { }
@@ -101,7 +106,7 @@ script_mod! {
             edit_message_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_EDIT) }
                 icon_walk +: { margin: Inset{top: -3} }
-                text: "Edit Message"
+                text: #(crate::i18n::tr("Edit Message")) i18n_text: "Edit Message"
             }
 
             // TODO: check if the current user is allowed to pin/unpin messages:
@@ -113,34 +118,34 @@ script_mod! {
 
             copy_text_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_COPY) }
-                text: "Copy Text"
+                text: #(crate::i18n::tr("Copy Text")) i18n_text: "Copy Text"
             }
 
             copy_html_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_HTML_FILE) }
-                text: "Copy Text as HTML"
+                text: #(crate::i18n::tr("Copy Text as HTML")) i18n_text: "Copy Text as HTML"
             }
 
             copy_link_to_message_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_LINK) }
-                text: "Copy Link to Message"
+                text: #(crate::i18n::tr("Copy Link to Message")) i18n_text: "Copy Link to Message"
             }
 
             view_source_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_VIEW_SOURCE) }
-                text: "View Source"
+                text: #(crate::i18n::tr("View Source")) i18n_text: "View Source"
             }
 
             jump_to_related_button := mod.widgets.ContextMenuButton {
                 draw_icon +: { svg: (ICON_JUMP) }
-                text: "Jump to Related Event"
+                text: #(crate::i18n::tr("Jump to Related Event")) i18n_text: "Jump to Related Event"
             }
 
             divider_before_report_delete := mod.widgets.ContextMenuDivider { }
 
             // report_button = mod.widgets.ContextMenuDangerButton {
             //     draw_icon.svg: (ICON_TRASH) // TODO: ICON_REPORT/WARNING/FLAG
-            //     text: "Report"
+            //     text: #(crate::i18n::tr("Report")) i18n_text: "Report"
             // }
 
             // Note: we don't yet support deleting others' messages via admin/moderator power levels.
@@ -150,7 +155,7 @@ script_mod! {
 
             delete_button := mod.widgets.ContextMenuDangerButton {
                 draw_icon.svg: (ICON_TRASH)
-                text: "Delete"
+                text: #(crate::i18n::tr("Delete")) i18n_text: "Delete"
             }
         }
     }
@@ -188,6 +193,7 @@ bitflags! {
         const CanCancelSend = 1 << 9;
         /// Whether this message has a real event ID, i.e., it isn't a local echo.
         const HasEventId = 1 << 10;
+        const CanForward = 1 << 11;
     }
 }
 impl MessageAbilities {
@@ -216,6 +222,7 @@ impl MessageAbilities {
             abilities.set(Self::CanDelete, user_power_levels.can_redact_own());
         }
         abilities.set(Self::HasEventId, event_tl_item.event_id().is_some());
+        abilities.set(Self::CanForward, event_tl_item.event_id().is_some() && matches!(message.kind, MsgLikeKind::Message(_)));
         match event_tl_item.send_state() {
             Some(EventSendState::SendingFailed { error, .. }) => {
                 abilities.set(Self::CanRetrySend, is_send_error_retryable(error));
@@ -282,6 +289,7 @@ pub struct NewMessageContextMenu {
     #[deref] view: View,
     #[source] source: ScriptObjectRef,
     #[rust] details: Option<MessageDetails>,
+    #[rust] focus_after_draw: bool,
 }
 
 impl Widget for NewMessageContextMenu {
@@ -294,6 +302,14 @@ impl Widget for NewMessageContextMenu {
         if self.visible {
             let main_content_area = self.view(cx, ids!(main_content)).area();
             cx.block_scrolling_except_within(main_content_area);
+            if step.is_done() && self.focus_after_draw {
+                if self.view.view(cx, ids!(reaction_input_view)).visible() {
+                    self.view.text_input(cx, ids!(reaction_input_view.reaction_text_input)).set_key_focus(cx);
+                } else {
+                    cx.set_key_focus(self.view.area());
+                }
+                self.focus_after_draw = false;
+            }
         }
         step
     }
@@ -306,12 +322,12 @@ impl Widget for NewMessageContextMenu {
 
         // Close the menu if:
         // 1. The back navigational gesture/action occurs (e.g., Back on Android),
-        // 2. The escape key is pressed if this menu has key focus,
+        // 2. Escape is pressed while the menu or one of its controls is active,
         // 3. The user clicks/touches outside the main_content view area.
         let close_menu = {
             event.back_pressed()
+            || matches!(event, Event::KeyDown(KeyEvent {key_code: KeyCode::Escape, ..}))
             || match event.hits_with_capture_overload(cx, area, true) {
-                Hit::KeyUp(key) => key.key_code == KeyCode::Escape,
                 Hit::FingerDown(fde) => {
                     let reaction_text_input = self.view.text_input(cx, ids!(reaction_input_view.reaction_text_input));
                     if reaction_text_input.area().rect(cx).contains(fde.abs) {
@@ -343,14 +359,24 @@ impl WidgetMatchEvent for NewMessageContextMenu {
 
         let reaction_text_input = self.view.text_input(cx, ids!(reaction_input_view.reaction_text_input));
         let reaction_send_button = self.view.button(cx, ids!(reaction_input_view.reaction_send_button));
+        if let Some(text) = reaction_text_input.changed(actions) {
+            reaction_send_button.set_enabled(cx, !text.trim().is_empty());
+        }
         if reaction_send_button.clicked(actions)
             || reaction_text_input.returned(actions).is_some()
         {
+            let reaction = reaction_text_input.text().trim().to_owned();
+            if reaction.is_empty() {
+                // TextInput releases focus on Enter; keep this editor usable
+                // when validation rejects the empty submission.
+                reaction_text_input.set_key_focus(cx);
+                return;
+            }
             cx.widget_action(
                 details.room_screen_widget_uid, 
                 MessageAction::React {
                     details: details.clone(),
-                    reaction: reaction_text_input.text(),
+                    reaction,
                 },
             );
             close_menu = true;
@@ -363,7 +389,8 @@ impl WidgetMatchEvent for NewMessageContextMenu {
             // In the future, we'll show an emoji chooser.
             self.view.button(cx, ids!(react_button)).set_visible(cx, false);
             self.view.view(cx, ids!(reaction_input_view)).set_visible(cx, true);
-            self.text_input(cx, ids!(reaction_input_view.reaction_text_input)).set_key_focus(cx);
+            reaction_send_button.set_enabled(cx, !reaction_text_input.text().trim().is_empty());
+            self.focus_after_draw = true;
             self.redraw(cx);
             close_menu = false;
         }
@@ -379,6 +406,10 @@ impl WidgetMatchEvent for NewMessageContextMenu {
                 details.room_screen_widget_uid, 
                 MessageAction::Reply(details.clone()),
             );
+            close_menu = true;
+        }
+        else if self.button(cx, ids!(forward_button)).clicked(actions) {
+            cx.widget_action(details.room_screen_widget_uid, MessageAction::SelectForward(details.clone()));
             close_menu = true;
         }
         else if self.button(cx, ids!(reply_in_thread_button)).clicked(actions) {
@@ -487,7 +518,7 @@ impl NewMessageContextMenu {
     pub fn show(&mut self, cx: &mut Cx, details: MessageDetails) -> DVec2 {
         self.details = Some(details);
         self.visible = true;
-        cx.set_key_focus(self.view.area());
+        self.focus_after_draw = true;
 
         // log!("Showing context menu for message: {:?}", self.details);
         self.set_button_visibility(cx)
@@ -527,6 +558,9 @@ impl NewMessageContextMenu {
         let show_copy_html = details.abilities.contains(MessageAbilities::HasHtml);
         let show_copy_link = details.abilities.contains(MessageAbilities::HasEventId);
         let show_view_source = details.abilities.contains(MessageAbilities::HasEventId);
+        let show_forward = details.abilities.contains(MessageAbilities::CanForward);
+        self.button(cx, ids!(forward_button)).set_visible(cx, show_forward);
+        self.button(cx, ids!(forward_button)).reset_hover(cx);
         let show_jump_to_related = details.related_event_id.is_some();
         // let show_report = true;
         let show_cancel_send = details.abilities.contains(MessageAbilities::CanCancelSend);
@@ -543,10 +577,10 @@ impl NewMessageContextMenu {
         self.view.view(cx, ids!(divider_after_react_reply)).set_visible(cx, show_divider_after_react_reply);
         edit_button.set_visible(cx, show_edit);
         if details.abilities.contains(MessageAbilities::CanPin) {
-            pin_button.set_text(cx, "Pin Message");
+            pin_button.set_text(cx, crate::i18n::tr("Pin Message"));
             show_pin = true;
         } else if details.abilities.contains(MessageAbilities::CanUnpin) {
-            pin_button.set_text(cx, "Unpin Message");
+            pin_button.set_text(cx, crate::i18n::tr("Unpin Message"));
             show_pin = true;
         } else {
             show_pin = false;
@@ -558,7 +592,7 @@ impl NewMessageContextMenu {
         jump_to_related_button.set_visible(cx, show_jump_to_related);
         self.view.view(cx, ids!(divider_before_report_delete)).set_visible(cx, show_divider_before_report_delete);
         // report_button.set_visible(cx, show_report);
-        delete_button.set_text(cx, if show_cancel_send { "Cancel Sending" } else { "Delete" });
+        delete_button.set_text(cx, if show_cancel_send { "Cancel Sending" } else { crate::i18n::tr("Delete") });
         delete_button.set_visible(cx, show_delete);
 
         // Reset the hover state of each button.
@@ -593,6 +627,7 @@ impl NewMessageContextMenu {
             + show_copy_html as usize
             + show_copy_link as usize
             + show_view_source as usize
+            + show_forward as usize
             + show_jump_to_related as usize
             // + show_report as usize
             + show_delete as usize;
@@ -607,6 +642,7 @@ impl NewMessageContextMenu {
     fn close(&mut self, cx: &mut Cx) {
         self.visible = false;
         self.details = None;
+        self.focus_after_draw = false;
         cx.revert_key_focus();
         cx.unblock_scrolling();
         cx.action(ContextMenuClosed);

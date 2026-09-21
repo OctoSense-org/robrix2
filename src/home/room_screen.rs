@@ -2,6 +2,8 @@
 //! of events (messages，state changes, etc.), along with an input bar at the bottom.
 
 use std::{borrow::Cow, cell::RefCell, ops::{DerefMut, Range}, sync::Arc};
+use crate::mini_app::{MiniAppCardWidgetRefExt, WebMiniApp};
+use crate::forwarding::{ForwardAction, ForwardBundle, ForwardCardWidgetRefExt, ForwardMessage};
 
 use hashbrown::{HashMap, HashSet};
 use imbl::Vector;
@@ -126,7 +128,7 @@ script_mod! {
             margin: 0
             draw_icon.svg: (ICON_DOWNLOAD)
             icon_walk: Walk{width: 16, height: 16}
-            text: "Download"
+            text: #(crate::i18n::tr("Download")) i18n_text: "Download"
         }
 
         share_button := RobrixIconButton {
@@ -135,7 +137,7 @@ script_mod! {
             margin: Inset{left: 8}
             draw_icon.svg: (ICON_SHARE)
             icon_walk: Walk{width: 16, height: 16}
-            text: "Share"
+            text: #(crate::i18n::tr("Share")) i18n_text: "Share"
         }
 
         downloading_view := View {
@@ -158,7 +160,7 @@ script_mod! {
                     text_style: REGULAR_TEXT { font_size: 11 },
                     color: (COLOR_ACTIVE_PRIMARY)
                 }
-                text: "Downloading…"
+                text: #(crate::i18n::tr("Downloading…")) i18n_text: "Downloading…"
             }
             cancel_button := RobrixNegativeIconButton {
                 height: mod.widgets.SETTINGS_BUTTON_HEIGHT,
@@ -166,7 +168,7 @@ script_mod! {
                 margin: 0
                 draw_icon.svg: (ICON_CLOSE)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
         }
 
@@ -177,7 +179,7 @@ script_mod! {
             margin: 0
             draw_icon.svg: (ICON_CHECKMARK)
             icon_walk: Walk{width: 16, height: 16}
-            text: "Downloaded"
+            text: #(crate::i18n::tr("Downloaded")) i18n_text: "Downloaded"
         }
 
         failure_button := RobrixNegativeIconButton {
@@ -187,7 +189,7 @@ script_mod! {
             margin: 0
             draw_icon.svg: (ICON_CLOSE)
             icon_walk: Walk{width: 16, height: 16}
-            text: "Download Failed"
+            text: #(crate::i18n::tr("Download Failed")) i18n_text: "Download Failed"
         }
     }
 
@@ -371,13 +373,16 @@ script_mod! {
                             text_style: USERNAME_TEXT_STYLE {},
                             color: (USERNAME_TEXT_COLOR)
                         }
-                        text: "<Username not available>"
+                        text: #(crate::i18n::tr("<Username not available>"))
                     }
                     agent_badge := mod.widgets.AgentBadge {}
                 }
 
                 message := HtmlOrPlaintext { }
+                mini_app_card := mod.widgets.MiniAppCard {}
+                forward_card := mod.widgets.ForwardCard {}
                 agent_approval_card := mod.widgets.AgentApprovalCard {}
+                agent_reply := mod.widgets.AgentReply {}
                 link_preview_view := mod.widgets.LinkPreview {}
                 download_section := mod.widgets.MessageDownloadSection {}
                 View {
@@ -390,6 +395,130 @@ script_mod! {
                 }
                 thread_root_summary := mod.widgets.ThreadRootSummary {}
             }
+        }
+    }
+
+    let MobileMessageProfile = View {
+        width: 40 height: Fit flow: Down spacing: 3
+        avatar := MobileAvatar {width: 40 height: 40}
+        edited_indicator := EditedIndicator {
+            width: Fill
+            edit_html +: {width: Fill font_size: 8 font_color: #x888888 body: #(crate::i18n::tr("edited")) i18n_body: "edited"}
+        }
+        tsp_sign_indicator := TspSignIndicator {}
+    }
+    let MobileMessageContent = View {
+        width: 250 height: Fit flow: Down spacing: 4
+        username_view := View {
+            width: Fill height: Fit flow: Right
+            username := Label {
+                width: Fill max_lines: 1 text_overflow: Ellipsis padding: 0
+                draw_text +: {color: #x888888 text_style: theme.font_regular {font_size: 9}}
+            }
+            agent_badge := mod.widgets.AgentBadge {}
+        }
+        bubble := RoundedView {
+            width: Fill height: Fit flow: Down padding: 10
+            draw_bg +: {color: #xffffff border_radius: 5}
+            message := HtmlOrPlaintext {
+                plaintext_view +: {pt_label +: {draw_text +: {color: #x191919 text_style: theme.font_regular {font_size: 12.5}}}}
+                html_view +: {html +: {font_size: 12.5 font_color: #x191919}}
+            }
+            mini_app_card := mod.widgets.MiniAppCard {}
+                forward_card := mod.widgets.ForwardCard {}
+                agent_approval_card := mod.widgets.AgentApprovalCard {}
+                agent_reply := mod.widgets.AgentReply {}
+            link_preview_view := mod.widgets.LinkPreview {}
+            download_section := mod.widgets.MessageDownloadSection {}
+        }
+        mobile_reply_preview := mod.widgets.MobileRepliedToMessage {}
+        View {
+            width: Fill height: Fit flow: Right
+            reaction_list := mod.widgets.ReactionList {}
+            avatar_row := mod.widgets.AvatarRow {}
+            send_status_indicator := mod.widgets.SendStatusIndicator {}
+        }
+        thread_root_summary := mod.widgets.ThreadRootSummary {}
+    }
+    mod.widgets.MobileMessage = mod.widgets.Message {
+        mobile_bubble: true
+        draw_bg +: {color: #xededed mentions_bar_color: #xededed mentions_bar_width: 0}
+        body := View {
+            width: Fill height: Fit flow: Right spacing: 10 padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            profile := MobileMessageProfile {}
+            content := MobileMessageContent {}
+            View {width: Fill height: 1}
+        }
+    }
+    mod.widgets.MobileOwnMessage = mod.widgets.Message {
+        mobile_bubble: true
+        draw_bg +: {color: #xededed mentions_bar_color: #xededed mentions_bar_width: 0}
+        body := View {
+            width: Fill height: Fit flow: Right spacing: 10 padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            View {width: Fill height: 1}
+            content := MobileMessageContent {
+                align: Align{x: 1}
+                username_view.visible: false
+                bubble +: {draw_bg.color: #x95ec69}
+            }
+            profile := MobileMessageProfile {}
+        }
+    }
+
+    mod.widgets.MobileMiniAppMessage = mod.widgets.MobileMessage {}
+    mod.widgets.MobileOwnMiniAppMessage = mod.widgets.MobileOwnMessage {
+        body.content.bubble.draw_bg.color: #xffffff
+    }
+    mod.widgets.MiniAppMessage = mod.widgets.Message {}
+
+    let MobileImageContent = View {
+        width: 240 height: Fit flow: Down spacing: 4
+        username_view := View {
+            width: Fill height: Fit flow: Right
+            username := Label {
+                width: Fill max_lines: 1 text_overflow: Ellipsis padding: 0
+                draw_text +: {color: #x888888 text_style: theme.font_regular {font_size: 9}}
+            }
+            agent_badge := mod.widgets.AgentBadge {}
+        }
+        message := View {
+            width: Fill height: Fit flow: Down
+            caption_view := View {
+                visible: false width: Fill height: Fit margin: Inset{bottom: 5}
+                caption := HtmlOrPlaintext {}
+            }
+            image := TextOrImage {
+                image_view +: {image +: {height: Fit{max: FitBound.Abs(280.0)}}}
+            }
+        }
+        download_section := mod.widgets.MessageDownloadSection {}
+        mobile_reply_preview := mod.widgets.MobileRepliedToMessage {}
+        View {
+            width: Fill height: Fit flow: Right
+            reaction_list := mod.widgets.ReactionList {}
+            avatar_row := mod.widgets.AvatarRow {}
+            send_status_indicator := mod.widgets.SendStatusIndicator {}
+        }
+        thread_root_summary := mod.widgets.ThreadRootSummary {}
+    }
+    mod.widgets.MobileImageMessage = mod.widgets.Message {
+        mobile_media: true
+        draw_bg +: {color: #xededed mentions_bar_color: #xededed mentions_bar_width: 0}
+        body := View {
+            width: Fill height: Fit flow: Right spacing: 10 padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            profile := MobileMessageProfile {}
+            content := MobileImageContent {}
+            View {width: Fill height: 1}
+        }
+    }
+    mod.widgets.MobileOwnImageMessage = mod.widgets.Message {
+        mobile_media: true
+        draw_bg +: {color: #xededed mentions_bar_color: #xededed mentions_bar_width: 0}
+        body := View {
+            width: Fill height: Fit flow: Right spacing: 10 padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            View {width: Fill height: 1}
+            content := MobileImageContent {username_view.visible: false}
+            profile := MobileMessageProfile {}
         }
     }
 
@@ -425,7 +554,10 @@ script_mod! {
                 padding: Inset{ left: 10.0 }
 
                 message := HtmlOrPlaintext { }
+                mini_app_card := mod.widgets.MiniAppCard {}
+                forward_card := mod.widgets.ForwardCard {}
                 agent_approval_card := mod.widgets.AgentApprovalCard {}
+                agent_reply := mod.widgets.AgentReply {}
                 link_preview_view := mod.widgets.LinkPreview {}
                 download_section := mod.widgets.MessageDownloadSection {}
                 View {
@@ -572,7 +704,7 @@ script_mod! {
                 draw_icon.svg: (ICON_ADD_USER)
                 draw_text.text_style: SMALL_STATE_TEXT_STYLE {}
                 icon_walk: Walk{width: 15, height: Fit, margin: Inset{right: -4}}
-                text: "Invite to Room"
+                text: #(crate::i18n::tr("Invite to Room")) i18n_text: "Invite to Room"
             }
 
             content := Label {
@@ -593,6 +725,20 @@ script_mod! {
     }
 
 
+    mod.widgets.MobileStateEvent = mod.widgets.SmallStateEvent {
+        padding: Inset{left: 28 right: 28 top: 3 bottom: 3}
+        body +: {
+            padding: 0
+            left_container.visible: false
+            avatar.visible: false
+            content +: {
+                align: Align{x: 0.5 y: 0.5}
+                margin: 0
+                draw_text +: {color: #x999999 text_style: theme.font_regular {font_size: 9}}
+            }
+        }
+    }
+
     // The view used for each day divider in a room's timeline.
     // The date text is centered between two horizontal lines.
     mod.widgets.DateDivider = View {
@@ -612,7 +758,7 @@ script_mod! {
                 text_style: TEXT_SUB {},
                 color: (COLOR_DIVIDER_DARK)
             }
-            text: "<date>"
+            text: #(crate::i18n::tr("<date>"))
         }
 
         right_line := LineH { }
@@ -627,13 +773,20 @@ script_mod! {
 
         date := Label {
             draw_text.color: (mod.widgets.COLOR_READ_MARKER)
-            text: "New Messages"
+            text: #(crate::i18n::tr("New Messages")) i18n_text: "New Messages"
         }
 
         right_line := LineH {
             draw_bg.color: (mod.widgets.COLOR_READ_MARKER)
         }
     }
+
+    mod.widgets.MobileDateDivider = mod.widgets.DateDivider {
+        left_line.visible: false right_line.visible: false
+        padding: 6
+        date +: {draw_text +: {color: #x999999 text_style: theme.font_regular {font_size: 9}}}
+    }
+    mod.widgets.MobileReadMarker = mod.widgets.MobileDateDivider {date.text: #(crate::i18n::tr("New Messages")) date.i18n_text: "New Messages"}
 
 
     // The top space is used to display a loading message while the room is being paginated.
@@ -656,7 +809,7 @@ script_mod! {
                 text_style: MESSAGE_TEXT_STYLE { font_size: 10 },
                 color: (TIMESTAMP_TEXT_COLOR)
             }
-            text: "Loading earlier messages..."
+            text: #(crate::i18n::tr("Loading earlier messages...")) i18n_text: "Loading earlier messages..."
         }
     }
 
@@ -687,14 +840,24 @@ script_mod! {
             //   excessive whitespace in HTML messages with `<ul>`/`<ol>` lists.
 
             // Below, we must place all of the possible templates (views) that can be used in the portal list.
+            MobileMessage := mod.widgets.MobileMessage {}
+            MobileOwnMessage := mod.widgets.MobileOwnMessage {}
+            MobileMiniAppMessage := mod.widgets.MobileMiniAppMessage {}
+            MobileOwnMiniAppMessage := mod.widgets.MobileOwnMiniAppMessage {}
+            MiniAppMessage := mod.widgets.MiniAppMessage {}
+            MobileImageMessage := mod.widgets.MobileImageMessage {}
+            MobileOwnImageMessage := mod.widgets.MobileOwnImageMessage {}
             Message := mod.widgets.Message {}
             CondensedMessage := mod.widgets.CondensedMessage {}
             ImageMessage := mod.widgets.ImageMessage {}
             CondensedImageMessage := mod.widgets.CondensedImageMessage {}
             SmallStateEvent := mod.widgets.SmallStateEvent {}
+            MobileStateEvent := mod.widgets.MobileStateEvent {}
             Empty := mod.widgets.Empty {}
             DateDivider := mod.widgets.DateDivider {}
             ReadMarker := mod.widgets.ReadMarker {}
+            MobileDateDivider := mod.widgets.MobileDateDivider {}
+            MobileReadMarker := mod.widgets.MobileReadMarker {}
         }
 
         // A jump to bottom button (with an unread message badge) that is shown
@@ -920,6 +1083,8 @@ pub struct RoomScreen {
     /// The user whose read receipt we're currently waiting to jump to, if any.
     /// This lets us ignore a response that arrives after the user gave up on it.
     #[rust] pending_read_receipt_jump: Option<OwnedUserId>,
+    #[rust] pending_history_jump: Option<OwnedEventId>,
+    #[rust] history_jump_started: bool,
     /// Fires when a background search for a jumped-to event has gone quiet.
     #[rust] jump_search_timer: Timer,
 }
@@ -1073,7 +1238,7 @@ impl Widget for RoomScreen {
                         .collect();
 
                     let mut tooltip_text = utils::human_readable_list(&tooltip_text_arr, MAX_VISIBLE_AVATARS_IN_READ_RECEIPT);
-                    tooltip_text.push_str(&format!(" reacted with: {}", reaction_data.reaction));
+                    tooltip_text.push_str(&crate::i18n::format(" reacted with: {0}", &[("0", (reaction_data.reaction).to_string())]));
                     cx.widget_action(
                         room_screen_widget_uid, 
                         TooltipAction::HoverIn {
@@ -1147,9 +1312,9 @@ impl Widget for RoomScreen {
                         };
                         let room_id = tl.kind.room_id().clone();
                         let content = ConfirmationModalContent {
-                            title_text: "Send Invitation".into(),
-                            body_text: format!("Are you sure you want to invite {username} to this room?").into(),
-                            accept_button_text: Some("Invite".into()),
+                            title_text: crate::i18n::tr("Send Invitation").into(),
+                            body_text: crate::i18n::format("Are you sure you want to invite {username} to this room?", &[("username", (username).to_string())]).into(),
+                            accept_button_text: Some(crate::i18n::tr("Invite").into()),
                             on_accept_clicked: Some(Box::new(move |_cx| {
                                 submit_async_request(MatrixRequest::InviteUser { room_id, user_id });
                             })),
@@ -1213,7 +1378,7 @@ impl Widget for RoomScreen {
                     // Only handle if this is for the current room.
                     if self.room_name_id.as_ref().is_some_and(|rn| rn.room_id() == room_id) {
                         enqueue_popup_notification(
-                            format!("Failed to send invite.\n\nError: {error}"),
+                            crate::i18n::format("Failed to send invite.\n\nError: {error}", &[("error", (error).to_string())]),
                             PopupKind::Error,
                             None,
                         );
@@ -1316,6 +1481,29 @@ impl Widget for RoomScreen {
             //       and wrap it in a `if let Event::Signal` conditional.
             user_profile_cache::process_user_profile_updates(cx);
             avatar_cache::process_avatar_updates(cx);
+        }
+
+        if self.tl_state.is_some() && !matches!(event, Event::Draw(_)) {
+            if let Some(event_id) = self.pending_history_jump.clone() {
+                let index = self.tl_state.as_ref().and_then(|tl| tl.items.iter().position(|item| item.as_event().is_some_and(|ev| ev.event_id() == Some(&event_id))));
+                if let Some(index) = index {
+                    // A restored stack view may not have drawn any PortalList items yet.
+                    // An absolute position survives its first draw; smooth_scroll_to does not.
+                    portal_list.set_tail_range(false);
+                    portal_list.set_first_id_and_scroll(index, 0.0);
+                    if loading_pane.is_searching_for(&event_id) {loading_pane.hide(cx);}
+                    self.pending_history_jump = None;
+                    self.history_jump_started = false;
+                    cx.widget_action(room_screen_widget_uid, MessageAction::HighlightMessage(index));
+                    self.redraw(cx);
+                } else if !self.history_jump_started {
+                    self.history_jump_started = true;
+                    self.jump_to_event(cx, &event_id, None, "the selected search result".into(), &portal_list, &loading_pane);
+                } else if !loading_pane.is_searching_for(&event_id) {
+                    self.pending_history_jump = None;
+                    self.history_jump_started = false;
+                }
+            }
         }
 
         // Forward the event to the inner timeline view, but capture any actions it produces
@@ -1459,6 +1647,7 @@ impl Widget for RoomScreen {
             // Set the portal list's range based on the number of timeline items.
             let tl_items = &tl_state.items;
             let last_item_id = tl_items.len();
+            let cleared_through = super::chat_actions::cleared_through(tl_state.kind.room_id());
 
             let list = list_ref.deref_mut();
             list.set_item_range(cx, 0, last_item_id);
@@ -1472,6 +1661,14 @@ impl Widget for RoomScreen {
                         list.item(cx, item_id, id!(Empty));
                         continue;
                     };
+                    if cleared_through.is_some_and(|cutoff| {
+                        timeline_item.as_event().map(|e| u64::from(e.timestamp().0) <= cutoff)
+                            .unwrap_or_else(|| !tl_items.iter().skip(tl_idx + 1).find_map(|i| i.as_event())
+                                .is_some_and(|e| u64::from(e.timestamp().0) > cutoff))
+                    }) {
+                        list.item(cx, item_id, id!(Empty)).draw_all(cx, scope);
+                        continue;
+                    }
 
                     // Determine whether this item's content and profile have been drawn since the last update.
                     // Pass this state to each of the `populate_*` functions so they can attempt to re-use
@@ -1629,18 +1826,20 @@ impl Widget for RoomScreen {
                             }
                         }
                         TimelineItemKind::Virtual(VirtualTimelineItem::DateDivider(millis)) => {
-                            let (item, existed) = list.item_with_existed(cx, item_id, id!(DateDivider));
+                            let template = if super::home_screen::effective_is_desktop(cx) { id!(DateDivider) } else { id!(MobileDateDivider) };
+                            let (item, existed) = list.item_with_existed(cx, item_id, template);
                             if !(existed && item_drawn_status.content_drawn) {
                                 let text = unix_time_millis_to_datetime(*millis)
                                     // format the time as a shortened date (Sat, Sept 5, 2021)
-                                    .map(|dt| format!("{}", dt.date_naive().format("%a %b %-d, %Y")))
+                                    .map(|dt| format!("{}", dt.date_naive().format(crate::i18n::date_format())))
                                     .unwrap_or_else(|| format!("{:?}", millis));
                                 item.label(cx, ids!(date)).set_text(cx, &text);
                             }
                             (item, ItemDrawnStatus::both_drawn())
                         }
                         TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => {
-                            let item = list.item(cx, item_id, id!(ReadMarker));
+                            let template = if super::home_screen::effective_is_desktop(cx) { id!(ReadMarker) } else { id!(MobileReadMarker) };
+                            let item = list.item(cx, item_id, template);
                             (item, ItemDrawnStatus::both_drawn())
                         }
                         TimelineItemKind::Virtual(VirtualTimelineItem::TimelineStart) => {
@@ -1721,7 +1920,8 @@ impl RoomScreen {
         let popup_menu = self.room_input_popup_menu(cx, ids!(room_input_popup_menu));
         let room_screen_rect = self.view(cx, ids!(room_screen_wrapper)).area().rect(cx);
         let margin = Inset {
-            left: button_rect.pos.x - room_screen_rect.pos.x,
+            left: (button_rect.pos.x - room_screen_rect.pos.x)
+                .clamp(0.0, (room_screen_rect.size.x - 235.0 - 8.0).max(0.0)),
             top: 0.0,
             right: 0.0,
             bottom: room_screen_rect.pos.y + room_screen_rect.size.y
@@ -1757,6 +1957,11 @@ impl RoomScreen {
             }
             RoomInputPopupMenuAction::SendCurrentLocation => {
                 room_input_bar.show_current_location_preview(cx);
+            }
+            RoomInputPopupMenuAction::ShareMiniApp => {
+                if let Some(timeline) = self.timeline_kind.clone() {
+                    cx.action(crate::mini_app::MiniAppAction::Compose(timeline));
+                }
             }
             RoomInputPopupMenuAction::None => {}
         }
@@ -1985,12 +2190,20 @@ impl RoomScreen {
 
                         // NOTE: this code was copied from the `MessageAction::JumpToRelated` handler;
                         //       we should deduplicate them at some point.
-                        let speed = 50.0;
-                        portal_list.smooth_scroll_to(cx, index, speed, None, 10.0);
-                        // start highlight animation.
-                        tl.message_highlight_animation_state = MessageHighlightAnimationState::Pending {
-                            item_id: index
-                        };
+                        if self.pending_history_jump.as_ref() == Some(&target_event_id) {
+                            portal_list.set_tail_range(false);
+                            portal_list.set_first_id_and_scroll(index, 0.0);
+                            self.pending_history_jump = None;
+                            self.history_jump_started = false;
+                            cx.widget_action(ui, MessageAction::HighlightMessage(index));
+                        } else {
+                            let speed = 50.0;
+                            portal_list.smooth_scroll_to(cx, index, speed, None, 10.0);
+                            // start highlight animation.
+                            tl.message_highlight_animation_state = MessageHighlightAnimationState::Pending {
+                                item_id: index
+                            };
+                        }
                     }
                     else {
                         // Here, the target event was not found in the current timeline,
@@ -2430,7 +2643,7 @@ impl RoomScreen {
                 if let Err(e) = robius_open::Uri::new(&url).open() {
                     error!("Failed to open URL {:?}. Error: {:?}", url, e);
                     enqueue_popup_notification(
-                        format!("Could not open URL: {url}"),
+                        crate::i18n::format("Could not open URL: {url}", &[("url", (url).to_string())]),
                         PopupKind::Error,
                         Some(10.0),
                     );
@@ -2445,7 +2658,7 @@ impl RoomScreen {
                 if let Err(e) = robius_open::Uri::new(&url).open() {
                     error!("Failed to open URL {:?}. Error: {:?}", url, e);
                     enqueue_popup_notification(
-                        format!("Could not open URL: {url}"),
+                        crate::i18n::format("Could not open URL: {url}", &[("url", (url).to_string())]),
                         PopupKind::Error,
                         Some(10.0),
                     );
@@ -2567,6 +2780,20 @@ impl RoomScreen {
                 #[cfg(feature = "agent_chat")]
                 MessageAction::AgentChatApprovalDecision { details, action } => {
                     self.handle_agent_chat_approval_decision(cx, details, action);
+                }
+                MessageAction::SelectForward(details) => {
+                    if let (Some(tl), Some(selected)) = (&self.tl_state, details.event_id()) {
+                        let cutoff = super::chat_actions::cleared_through(tl.kind.room_id());
+                        let messages: Vec<_> = tl.items.iter().filter_map(|i| i.as_event())
+                            .filter(|e| cutoff.is_none_or(|t| u64::from(e.timestamp().0) > t))
+                            .filter_map(ForwardMessage::from_event).collect();
+                        if messages.iter().any(|m| &m.event_id == selected) {
+                            cx.action(ForwardAction::Select {
+                                title: self.room_name_id.as_ref().map(|r| r.display().to_string()).unwrap_or_else(|| "Chat history".into()),
+                                messages, selected: selected.clone(),
+                            });
+                        }
+                    }
                 }
                 MessageAction::React { details, reaction } => {
                     let Some(tl) = self.tl_state.as_ref() else { return };
@@ -2899,9 +3126,9 @@ impl RoomScreen {
                         continue;
                     }
                     let content = ConfirmationModalContent {
-                        title_text: "Delete Message".into(),
-                        body_text: "Are you sure you want to delete this message? This cannot be undone.".into(),
-                        accept_button_text: Some("Delete".into()),
+                        title_text: crate::i18n::tr("Delete Message").into(),
+                        body_text: crate::i18n::tr("Are you sure you want to delete this message? This cannot be undone.").into(),
+                        accept_button_text: Some(crate::i18n::tr("Delete").into()),
                         on_accept_clicked: Some(Box::new(move |_cx| {
                             submit_async_request(MatrixRequest::RedactMessage {
                                 timeline_kind,
@@ -3328,6 +3555,8 @@ impl RoomScreen {
         self.read_receipt_state.clear();
         // Closing/hiding the room should cancel any pending jump/search.
         self.pending_read_receipt_jump = None;
+        self.pending_history_jump = None;
+        self.history_jump_started = false;
         self.jump_search_timer = Timer::empty();
         // Live approval deadlines are re-tracked when the timeline is shown again.
         #[cfg(feature = "agent_chat")]
@@ -3741,6 +3970,14 @@ impl RoomScreen {
 }
 
 impl RoomScreenRef {
+    pub fn jump_to_history_event(&self, cx: &mut Cx, event: OwnedEventId) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.pending_history_jump = Some(event);
+            inner.history_jump_started = false;
+            inner.redraw(cx);
+            SignalToUI::set_ui_signal();
+        }
+    }
     /// See [`RoomScreen::set_displayed_room()`].
     pub fn set_displayed_room(
         &self,
@@ -4445,7 +4682,8 @@ fn populate_message_view(
 
     // Determine whether we can use a more compact UI view that hides the user's profile info
     // if the previous message (including stickers) was sent by the same user within 10 minutes.
-    let use_compact_view = match prev_event.map(|p| p.kind()) {
+    let mobile = !super::home_screen::effective_is_desktop(cx);
+    let use_compact_view = !mobile && match prev_event.map(|p| p.kind()) {
         Some(TimelineItemKind::Event(prev_event_tl_item)) => match prev_event_tl_item.content() {
             TimelineItemContent::MsgLike(_msg_like_content) => {
                 let prev_msg_sender = prev_event_tl_item.sender();
@@ -4466,6 +4704,8 @@ fn populate_message_view(
     let mut set_username_and_get_avatar_retval = None;
     let mut has_room_mention = false;
     let mut download_info: Option<DownloadableAttachment> = None;
+    let mut web_mini_app = None;
+    let mut forward_bundle = None;
     #[cfg(feature = "agent_chat")]
     let mut agent_chat_message: Option<ApprovalMessage> = None;
     #[cfg(feature = "agent_chat")]
@@ -4480,9 +4720,43 @@ fn populate_message_view(
                 None
             };
             match msg.msgtype() {
+                message if message.msgtype() == crate::forwarding::MSGTYPE => {
+                    has_html_body = false;
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMiniAppMessage) } else { id!(MobileMiniAppMessage) }
+                    } else { id!(MiniAppMessage) };
+                    let (item, _) = list.item_with_existed(cx, item_id, template);
+                    item.link_preview(cx, ids!(content.link_preview_view)).clear(cx);
+                    forward_bundle = ForwardBundle::from_message(message);
+                    if forward_bundle.is_none() {
+                        let content = item.html_or_plaintext(cx, ids!(content.message));
+                        populate_text_message_content(cx, &content, message.body(), None, None, None, None, None);
+                    }
+                    new_drawn_status.content_drawn = true;
+                    (item, false)
+                }
+                message if message.msgtype() == crate::mini_app::MSGTYPE => {
+                    has_html_body = false;
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMiniAppMessage) } else { id!(MobileMiniAppMessage) }
+                    } else { id!(MiniAppMessage) };
+                    let (item, _) = list.item_with_existed(cx, item_id, template);
+                    item.link_preview(cx, ids!(content.link_preview_view)).clear(cx);
+                    match WebMiniApp::from_message(message) {
+                        Ok(app) => { web_mini_app = Some(app); }
+                        Err(_) => {
+                            let content = item.html_or_plaintext(cx, ids!(content.message));
+                            populate_text_message_content(cx, &content, "This mini-app card has an unsupported or invalid web address.", None, None, None, None, None);
+                        }
+                    }
+                    new_drawn_status.content_drawn = true;
+                    (item, false)
+                }
                 MessageType::Text(TextMessageEventContent { body, formatted, .. }) => {
                     has_html_body = formatted.as_ref().is_some_and(|f| f.format == MessageFormat::Html);
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4519,7 +4793,9 @@ fn populate_message_view(
                 MessageType::Notice(NoticeMessageEventContent{body, formatted, ..}) => {
                     is_notice = true;
                     has_html_body = formatted.as_ref().is_some_and(|f| f.format == MessageFormat::Html);
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4618,7 +4894,9 @@ fn populate_message_view(
                 // to indicate that it's an "action" that the user is performing.
                 MessageType::Emote(EmoteMessageEventContent { body, formatted, .. }) => {
                     has_html_body = formatted.as_ref().is_some_and(|f| f.format == MessageFormat::Html);
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4671,7 +4949,9 @@ fn populate_message_view(
                 MessageType::Image(image) => {
                     has_html_body = image.formatted.as_ref()
                         .is_some_and(|f| f.format == MessageFormat::Html);
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnImageMessage) } else { id!(MobileImageMessage) }
+                    } else if use_compact_view {
                         id!(CondensedImageMessage)
                     } else {
                         id!(ImageMessage)
@@ -4708,7 +4988,9 @@ fn populate_message_view(
                 }
                 MessageType::Location(location) => {
                     has_html_body = false;
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4737,7 +5019,9 @@ fn populate_message_view(
                         size: file_content.info.as_ref().and_then(|i| i.size).map(u64::from),
                         kind: DownloadKind::File,
                     });
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4765,7 +5049,9 @@ fn populate_message_view(
                         size: audio.info.as_ref().and_then(|i| i.size).map(u64::from),
                         kind: DownloadKind::Audio,
                     });
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4793,7 +5079,9 @@ fn populate_message_view(
                         size: video.info.as_ref().and_then(|i| i.size).map(u64::from),
                         kind: DownloadKind::Video,
                     });
-                    let template = if use_compact_view {
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMessage) } else { id!(MobileMessage) }
+                    } else if use_compact_view {
                         id!(CondensedMessage)
                     } else {
                         id!(Message)
@@ -4990,7 +5278,20 @@ fn populate_message_view(
         }
     };
 
+    item.widget(cx, ids!(content.message)).set_visible(cx, web_mini_app.is_none() && forward_bundle.is_none());
+    item.forward_card(cx, ids!(content.forward_card)).set_bundle(cx, forward_bundle);
+    item.mini_app_card(cx, ids!(content.mini_app_card)).set_app(cx, web_mini_app, timeline_kind);
+
     let timeline_event_id = event_tl_item.identifier();
+
+    if mobile {
+        let direct = cx.get_global::<RoomsListRef>().is_direct_room(timeline_kind.room_id()).unwrap_or(false);
+        #[cfg(feature = "agent_chat")]
+        let agent = agent_presentation.is_some();
+        #[cfg(not(feature = "agent_chat"))]
+        let agent = false;
+        item.view(cx, ids!(content.username_view)).set_visible(cx, !event_tl_item.is_own() && (!direct || agent));
+    }
 
     // If we didn't use a cached item, we need to draw all other message content:
     // the reactions, the read receipts avatar row, the reply preview.
@@ -5007,9 +5308,11 @@ fn populate_message_view(
             item_id,
         );
         populate_read_receipts(&item, cx, timeline_kind, event_tl_item);
+        let mobile_reply = item.widget(cx, ids!(mobile_reply_preview));
+        let reply = if mobile_reply.is_empty() { item.widget(cx, ids!(replied_to_message)) } else { mobile_reply };
         let is_reply_fully_drawn = draw_replied_to_message(
             cx,
-            &item.widget(cx, ids!(replied_to_message)),
+            &reply,
             timeline_kind,
             msg_like_content.in_reply_to.as_ref(),
             event_tl_item.event_id(),
@@ -5074,6 +5377,32 @@ fn populate_message_view(
         is_blocked_by_failed_send,
         is_room_encrypted,
     );
+
+    #[cfg(feature = "agent_chat")]
+    {
+        use crate::agent_chat::reply::AgentReplyWidgetRefExt;
+        let reply = item.agent_reply(cx, ids!(content.agent_reply));
+        let text = match &msg_like_content.kind {
+            MsgLikeKind::Message(msg) => match msg.msgtype() {
+                MessageType::Text(text) => Some((&text.body, text.formatted.as_ref())),
+                MessageType::Notice(text) => Some((&text.body, text.formatted.as_ref())),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some((body, formatted)), Some(mut presentation), Some(event_id)) =
+            (text, AgentMessagePresentation::for_sender(event_tl_item.sender()), event_tl_item.event_id())
+        {
+            let (body, formatted) = presentation.present(body, formatted);
+            let identity = format!("{}|{}|{}", crate::sliding_sync::current_user_id().map(|id| id.to_string()).unwrap_or_default(), timeline_kind.room_id(), event_id);
+            let fresh = crate::agent_chat::reply::event_is_fresh(event_tl_item);
+            reply.populate(cx, identity, &body, formatted.as_deref(), crate::agent_chat::reply::event_is_live(event_tl_item), fresh);
+            item.widget(cx, ids!(content.message)).set_visible(cx, false);
+        } else {
+            reply.hide(cx);
+            if text.is_some() { item.widget(cx, ids!(content.message)).set_visible(cx, true); }
+        }
+    }
 
     // The approval card must be (re)set on every non-cached populate: a recycled
     // Message widget may have shown a card for a different message before.
@@ -5145,7 +5474,7 @@ fn populate_message_view(
             // Server notices are drawn with a red color avatar background and username.
             let avatar = item.avatar(cx, ids!(profile.avatar));
             avatar.show_text(cx, Some(COLOR_FG_DANGER_RED), None, "⚠");
-            username_label.set_text(cx, "Server notice");
+            username_label.set_text(cx, crate::i18n::tr("Server notice"));
             script_apply_eval!(cx, username_label, {
                 draw_text +: {
                     color: (mod.widgets.COLOR_FG_DANGER_RED)
@@ -5169,7 +5498,14 @@ fn populate_message_view(
     // (this widget may be reused for a non-edited message at the same row).
     let edited_indicator = item.edited_indicator(cx, ids!(profile.edited_indicator));
     if msg_like_content.as_message().is_some_and(|m| m.is_edited()) {
-        edited_indicator.set_latest_edit(cx, event_tl_item);
+        #[cfg(feature = "agent_chat")]
+        let streaming = crate::agent_chat::reply::event_is_live(event_tl_item)
+            && crate::agent_chat::reply::event_is_fresh(event_tl_item)
+            && crate::agent_chat::agents::is_agent_localpart(event_tl_item.sender().localpart());
+        #[cfg(not(feature = "agent_chat"))]
+        let streaming = false;
+        if streaming { edited_indicator.hide(cx); }
+        else { edited_indicator.set_latest_edit(cx, event_tl_item); }
     } else {
         edited_indicator.hide(cx);
     }
@@ -5265,7 +5601,7 @@ fn populate_agent_chat_approval_card(
 /// Also populates link previews if a link_preview_ref is provided.
 ///
 /// Returns whether the text items were fully drawn.
-fn populate_text_message_content(
+pub(crate) fn populate_text_message_content(
     cx: &mut Cx,
     message_content_widget: &HtmlOrPlaintextRef,
     body: &str,
@@ -5389,7 +5725,7 @@ fn populate_image_message_content_with_fallback(
 /// Draws an image into the given `text_or_image_ref`.
 ///
 /// Returns whether it was fully drawn (meaning its content was fully loaded/available).
-fn populate_image_message_content(
+pub(super) fn populate_image_message_content(
     cx: &mut Cx,
     text_or_image_ref: &TextOrImageRef,
     image_info_source: Option<&ImageInfo>,
@@ -5436,7 +5772,7 @@ fn populate_image_message_content(
                         .map(|()| img.size_in_pixels(cx).unwrap_or_default())
                 });
                 if let Err(e) = show_image_result {
-                    let err_str = format!("{body}\n\nFailed to display image: {e:?}");
+                    let err_str = crate::i18n::format("{body}\n\nFailed to display image: {e}", &[("body", (body).to_string()), ("e", format!("{:?}", e))]);
                     error!("{err_str}");
                     text_or_image_ref.show_text(cx, &err_str);
                 }
@@ -5484,7 +5820,7 @@ fn populate_image_message_content(
                         }
                     });
                     if let Err(e) = show_image_result {
-                        let err_str = format!("{body}\n\nFailed to display image: {e:?}");
+                        let err_str = crate::i18n::format("{body}\n\nFailed to display image: {e}", &[("body", (body).to_string()), ("e", format!("{:?}", e))]);
                         error!("{err_str}");
                         text_or_image_ref.show_text(cx, &err_str);
                     }
@@ -5513,7 +5849,7 @@ fn populate_image_message_content(
             (MediaCacheEntry::Failed(_status_code), _media_format) => {
                 text_or_image_ref.show_text(
                     cx,
-                    format!("{body}\n\nFailed to fetch image from {:?}", media_source_mxc(&media_source)),
+                    crate::i18n::format("{body}\n\nFailed to fetch image from {0}", &[("body", (body).to_string()), ("0", format!("{:?}", media_source_mxc(&media_source)))]),
                 );
                 // For now, we consider this as being "complete". In the future, we could support
                 // retrying to fetch thumbnail of the image on a user click/tap.
@@ -5530,7 +5866,7 @@ fn populate_image_message_content(
             fetch_and_show_media_source(cx, media_source, image_info);
         }
         None => {
-            text_or_image_ref.show_text(cx, format!("{body}\n\nImage message had no source URL."));
+            text_or_image_ref.show_text(cx, crate::i18n::format("{body}\n\nImage message had no source URL.", &[("body", (body).to_string())]));
             fully_drawn = true;
         }
     }
@@ -5562,7 +5898,7 @@ fn populate_file_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("<b>File: </b>{caption}{filename}{size}"),
+        crate::i18n::format("<b>File: </b>{caption}{filename}{size}", &[("caption", (caption).to_string()), ("filename", (filename).to_string()), ("size", (size).to_string())]),
     );
     true
 }
@@ -5581,7 +5917,7 @@ fn populate_audio_message_content(
         .as_ref()
         .map(|info| (
             info.duration
-                .map(|d| format!(",  {:.2} sec", d.as_secs_f64()))
+                .map(|d| crate::i18n::format(",  {0} sec", &[("0", format!("{:.2}", d.as_secs_f64()))]))
                 .unwrap_or_default(),
             info.mimetype
                 .as_ref()
@@ -5602,7 +5938,7 @@ fn populate_audio_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("<b>Audio: </b>{caption}File: <i>{filename}</i>{size}{mime}{duration}<br> → <i>Video playback not yet supported.</i>"),
+        crate::i18n::format("<b>Audio: </b>{caption}File: <i>{filename}</i>{size}{mime}{duration}<br> → <i>Video playback not yet supported.</i>", &[("caption", (caption).to_string()), ("filename", (filename).to_string()), ("size", (size).to_string()), ("mime", (mime).to_string()), ("duration", (duration).to_string())]),
     );
     true
 }
@@ -5622,7 +5958,7 @@ fn populate_video_message_content(
         .as_ref()
         .map(|info| (
             info.duration
-                .map(|d| format!(",  {:.2} sec", d.as_secs_f64()))
+                .map(|d| crate::i18n::format(",  {0} sec", &[("0", format!("{:.2}", d.as_secs_f64()))]))
                 .unwrap_or_default(),
             info.mimetype
                 .as_ref()
@@ -5646,7 +5982,7 @@ fn populate_video_message_content(
 
     message_content_widget.show_html(
         cx,
-        format!("<b>Video: </b>{caption}File: <i>{filename}</i>{size}{mime}{duration}{dimensions}<br> → <i>Video playback not yet supported.</i>"),
+        crate::i18n::format("<b>Video: </b>{caption}File: <i>{filename}</i>{size}{mime}{duration}{dimensions}<br> → <i>Video playback not yet supported.</i>", &[("caption", (caption).to_string()), ("filename", (filename).to_string()), ("size", (size).to_string()), ("mime", (mime).to_string()), ("duration", (duration).to_string()), ("dimensions", (dimensions).to_string())]),
     );
     true
 }
@@ -5682,7 +6018,7 @@ fn populate_location_message_content(
     } else {
         message_content_widget.show_html(
             cx,
-            format!("<i>[Location invalid]</i> {}", htmlize::escape_text(&location.body))
+            crate::i18n::format("<i>[Location invalid]</i> {0}", &[("0", (htmlize::escape_text(&location.body)).to_string())])
         );
     }
 
@@ -5727,7 +6063,7 @@ fn populate_redacted_message_content(
         if redactor == event_tl_item.sender() {
             fully_drawn = true;
             match reason {
-                Some(r) => format!("⛔ <i>Deleted their own message. Reason: \"{}\".</i>", htmlize::escape_text(r)),
+                Some(r) => crate::i18n::format("⛔ <i>Deleted their own message. Reason: \"{0}\".</i>", &[("0", (htmlize::escape_text(r)).to_string())]),
                 None => String::from("⛔ <i>Deleted their own message.</i>"),
             }
         } else {
@@ -5741,11 +6077,8 @@ fn populate_redacted_message_content(
             fully_drawn = redactor_name.was_found();
             let redactor_name_esc = htmlize::escape_text(redactor_name.as_deref().unwrap_or(redactor.as_str()));
             match reason {
-                Some(r) => format!("⛔ <i>{} deleted this message. Reason: \"{}\".</i>",
-                    redactor_name_esc,
-                    htmlize::escape_text(r),
-                ),
-                None => format!("⛔ <i>{} deleted this message.</i>", redactor_name_esc),
+                Some(r) => crate::i18n::format("⛔ <i>{0} deleted this message. Reason: \"{1}\".</i>", &[("0", (redactor_name_esc).to_string()), ("1", (htmlize::escape_text(r)).to_string())]),
+                None => crate::i18n::format("⛔ <i>{0} deleted this message.</i>", &[("0", (redactor_name_esc).to_string())]),
             }
         }
     } else {
@@ -5813,7 +6146,7 @@ fn draw_replied_to_message(
                 fully_drawn = true;
                 replied_to_message_view
                     .label(cx, ids!(preview_content.reply_preview_username))
-                    .set_text(cx, "[Error fetching username]");
+                    .set_text(cx, crate::i18n::tr("[Error fetching username]"));
                 replied_to_message_view
                     .avatar(cx, ids!(preview_content.reply_preview_avatar))
                     .show_text(cx, None, None, "?");
@@ -5826,7 +6159,7 @@ fn draw_replied_to_message(
                 fully_drawn = false;
                 replied_to_message_view
                     .label(cx, ids!(preview_content.reply_preview_username))
-                    .set_text(cx, "[Loading username...]");
+                    .set_text(cx, crate::i18n::tr("[Loading username...]"));
                 replied_to_message_view
                     .avatar(cx, ids!(preview_content.reply_preview_avatar))
                     .show_text(cx, None, None, "?");
@@ -5948,7 +6281,7 @@ fn populate_thread_root_summary(
 
     let replies_count_text = match replies_count {
         1 => Cow::Borrowed("1 reply"),
-        n => Cow::Owned(format!("{n} replies"))
+        n => Cow::Owned(crate::i18n::format("{n} replies", &[("n", (n).to_string())]))
     };
     item.label(cx, ids!(thread_summary_count))
         .set_text(cx, &replies_count_text);
@@ -6052,7 +6385,7 @@ impl SmallStateEventContent for LiveLocationState {
     ) -> (WidgetRef, ItemDrawnStatus) {
         item.label(cx, ids!(content)).set_text(
             cx,
-            &format!("{username} shared a live location."),
+            &crate::i18n::format("{username} shared a live location.", &[("username", (username).to_string())]),
         );
         new_drawn_status.content_drawn = true;
         (item, new_drawn_status)
@@ -6190,7 +6523,8 @@ fn populate_small_state_event(
     item_drawn_status: ItemDrawnStatus,
 ) -> (WidgetRef, ItemDrawnStatus) {
     let mut new_drawn_status = item_drawn_status;
-    let (item, existed) = list.item_with_existed(cx, item_id, id!(SmallStateEvent));
+    let template = if super::home_screen::effective_is_desktop(cx) { id!(SmallStateEvent) } else { id!(MobileStateEvent) };
+    let (item, existed) = list.item_with_existed(cx, item_id, template);
     // The content of a small state event view may depend on the profile info,
     // so we can only mark the content as drawn after the profile has been fully drawn and cached.
     let skip_redrawing_profile = existed && item_drawn_status.profile_drawn;
@@ -6296,6 +6630,7 @@ pub enum MessageAction {
     },
     /// The user clicked the "reply" button on a message.
     Reply(MessageDetails),
+    SelectForward(MessageDetails),
     /// The user clicked the "reply in thread" button on a message, indicating
     /// they want to open (or start) that message's thread and reply within it.
     ReplyInThread(MessageDetails),
@@ -6382,6 +6717,8 @@ impl ActionDefaultRef for MessageAction {
 /// A widget representing a single message of any kind within a room timeline.
 #[derive(Script, Widget, Animator)]
 pub struct Message {
+    #[live] mobile_bubble: bool,
+    #[live] mobile_media: bool,
     #[source] source: ScriptObjectRef,
     #[deref] view: View,
     #[apply_default] animator: Animator,
@@ -6627,9 +6964,10 @@ impl Widget for Message {
             }
 
             // Handle clicks on the reply preview's "show more" or "show less" buttons.
-            let reply_expand_button = self.button(cx, ids!(replied_to_message.reply_expand_button));
-            let reply_collapse_button = self.button(cx, ids!(replied_to_message.reply_collapse_button));
-            if reply_expand_button.clicked(actions) || reply_collapse_button.clicked(actions)             {
+            let reply = self.replied_to_message_view(cx);
+            let reply_expand_button = reply.button(cx, ids!(reply_expand_button));
+            let reply_collapse_button = reply.button(cx, ids!(reply_collapse_button));
+            if reply_expand_button.clicked(actions) || reply_collapse_button.clicked(actions) {
                 cx.widget_action(
                     room_screen_widget_uid,
                     MessageAction::ToggleReplyPreviewExpanded(
@@ -6676,6 +7014,35 @@ impl Widget for Message {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        if self.mobile_media {
+            let width = (cx.turtle().rect().size.x - 100.0).clamp(80.0, 240.0);
+            if let Some(mut content) = self.view.view(cx, ids!(body.content)).borrow_mut() {
+                content.walk.width = Size::Fixed(width);
+            }
+        }
+        if self.mobile_bubble {
+            let max_width = (cx.turtle().rect().size.x - 100.0).max(80.0);
+            let plaintext = self.view.view(cx, ids!(content.message.plaintext_view));
+            let label = self.view.label(cx, ids!(content.message.plaintext_view.pt_label));
+            let text = label.text();
+            let mini_app = self.view.widget(cx, ids!(content.mini_app_card)).visible()
+                || self.view.widget(cx, ids!(content.forward_card)).visible();
+            let natural_width = if mini_app { max_width.min(280.0) } else if plaintext.visible() {
+                label.borrow().map(|label| {
+                    label.draw_text.layout(cx, 0.0, 0.0, None, false, Align::default(), &text)
+                        .rows.iter().map(|row| (row.width_in_lpxs * label.draw_text.font_scale) as f64)
+                        .fold(0.0, f64::max).ceil() + 22.0
+                }).unwrap_or(max_width)
+            } else { max_width };
+            let bubble_width = natural_width.clamp(44.0, max_width);
+            let has_quote = self.view.widget(cx, ids!(mobile_reply_preview)).visible();
+            if let Some(mut content) = self.view.view(cx, ids!(body.content)).borrow_mut() {
+                content.walk.width = Size::Fixed(if has_quote { max_width } else { bubble_width });
+            }
+            if let Some(mut bubble) = self.view.view(cx, ids!(body.content.bubble)).borrow_mut() {
+                bubble.walk.width = Size::Fixed(bubble_width);
+            }
+        }
         if self.details.as_ref().is_some_and(|d| d.should_be_highlighted) {
             script_apply_eval!(cx, self, {
                 draw_bg +: {
@@ -6694,7 +7061,10 @@ impl Message {
         if let Some(reply) = &self.replied_to_message_view {
             return reply.clone();
         }
-        let reply = self.view.widget(cx, ids!(replied_to_message)).as_collapsible_preview();
+        let mobile_reply = self.view.widget(cx, ids!(mobile_reply_preview));
+        let reply = if mobile_reply.is_empty() {
+            self.view.widget(cx, ids!(replied_to_message))
+        } else { mobile_reply }.as_collapsible_preview();
         self.replied_to_message_view = Some(reply.clone());
         reply
     }
@@ -6783,7 +7153,7 @@ impl Message {
         self.send_status_indicator(cx).set_from_event(cx, event_tl_item, is_newest_sent, is_blocked_by_failed_send, is_room_encrypted);
 
         // Re-apply this every time to ensure a re-used portallist item is still correctly expanded.
-        self.view.widget(cx, ids!(replied_to_message)).as_collapsible_preview().set_expanded(is_reply_expanded);
+        self.replied_to_message_view(cx).set_expanded(is_reply_expanded);
 
         let section_visible = self.download_info.is_some();
         self.view.view(cx, ids!(content.download_section)).set_visible(cx, section_visible);
@@ -6802,7 +7172,7 @@ impl Message {
             failure_button.set_visible(cx, matches!(download_state, DownloadDisplayState::Failed));
             if let DownloadDisplayState::Succeeded(kind) = download_state {
                 success_button.set_text(cx, match kind {
-                    TransferKind::Download => "Downloaded",
+                    TransferKind::Download => crate::i18n::tr("Downloaded"),
                     TransferKind::Share => "Shared",
                 });
             }

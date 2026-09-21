@@ -39,7 +39,7 @@ script_mod! {
 
             font_size: (mod.widgets.EDITED_INDICATOR_FONT_SIZE),
             font_color: (COLOR_ROBRIX_PURPLE),
-            body: "(<u>edited</u>)",
+            body: #(crate::i18n::tr("(<u>edited</u>)")) i18n_body: "(<u>edited</u>)",
         }
     }
 }
@@ -71,12 +71,12 @@ impl Widget for EditedIndicator {
             _ => false,
         };
         if should_hover_in {
-            // TODO: use pure_rust_locales crate to format the time based on the chosen Locale.
-            let locale_extended_fmt_en_us= "%a %b %-d, %Y, %r";
+            // Follow the selected interface language.
+            let locale_extended_fmt_en_us = crate::i18n::full_date_format();
             let text = if let Some(ts) = self.latest_edit_ts {
-                format!("Last edited {}", ts.format(locale_extended_fmt_en_us))
+                crate::i18n::format("Last edited {0}", &[("0", (ts.format(locale_extended_fmt_en_us)).to_string())])
             } else {
-                "Last edit time unknown".to_string()
+                crate::i18n::tr("Last edit time unknown").to_string()
             };
             cx.widget_action(
                 self.widget_uid(), 

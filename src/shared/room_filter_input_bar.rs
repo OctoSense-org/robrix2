@@ -43,7 +43,7 @@ script_mod! {
             flow: Flow.Right { wrap: false },
             padding: 5
             
-            empty_text: "Filter rooms & spaces..."
+            empty_text: #(crate::i18n::tr("Filter rooms & spaces...")) i18n_empty_text: "Filter rooms & spaces..."
             autocapitalize: None,
             
             // Make the input fill match the container so the whole field reads as

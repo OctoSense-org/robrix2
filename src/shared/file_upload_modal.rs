@@ -41,7 +41,7 @@ script_mod! {
             text_style: REGULAR_TEXT { font_size: 10 },
             color: (SMALL_STATE_TEXT_COLOR)
         }
-        text: "Preview truncated to 128 KB."
+        text: #(crate::i18n::tr("Preview truncated to 128 KB.")) i18n_text: "Preview truncated to 128 KB."
     }
 
     mod.widgets.FileUploadModal = set_type_default() do #(FileUploadModal::register_widget(vm)) {
@@ -79,7 +79,7 @@ script_mod! {
                     text_style: TITLE_TEXT { font_size: 16 },
                     color: #000
                 }
-                text: "Upload File"
+                text: #(crate::i18n::tr("Upload File")) i18n_text: "Upload File"
             }
 
             close_button := RobrixIconButton {
@@ -108,7 +108,7 @@ script_mod! {
                 height: Fit { max: FitBound.Rel{base: Base.Full, factor: 0.5} },
                 is_multiline: true,
                 submit_on_enter: true,
-                empty_text: "Enter caption..."
+                empty_text: #(crate::i18n::tr("Enter caption...")) i18n_empty_text: "Enter caption..."
                 padding: 10,
                 draw_text +: {
                     text_style: REGULAR_TEXT { font_size: 11 },
@@ -139,7 +139,7 @@ script_mod! {
                 text_style: REGULAR_TEXT { font_size: 11 },
                 color: (COLOR_TEXT_WARNING_NOT_FOUND)
             }
-            text: "This file is large (over 10 MB). Are you sure you want to upload it to the homeserver?"
+            text: #(crate::i18n::tr("This file is large (over 10 MB). Are you sure you want to upload it to the homeserver?")) i18n_text: "This file is large (over 10 MB). Are you sure you want to upload it to the homeserver?"
         }
 
         empty_attachment_warning_label := Label {
@@ -152,7 +152,7 @@ script_mod! {
                 text_style: REGULAR_TEXT { font_size: 11 },
                 color: (COLOR_TEXT_WARNING_NOT_FOUND)
             }
-            text: "This file is empty (0 bytes). Are you sure you want to upload it?"
+            text: #(crate::i18n::tr("This file is empty (0 bytes). Are you sure you want to upload it?")) i18n_text: "This file is empty (0 bytes). Are you sure you want to upload it?"
         }
 
         // The view showing the preview of the file being uploaded, switching between
@@ -183,7 +183,7 @@ script_mod! {
                             text_style: REGULAR_TEXT { font_size: 13 },
                             color: (SMALL_STATE_TEXT_COLOR)
                         }
-                        text: "Loading file preview..."
+                        text: #(crate::i18n::tr("Loading file preview...")) i18n_text: "Loading file preview..."
                     }
                 }
 
@@ -280,7 +280,7 @@ script_mod! {
                             text_style: TITLE_TEXT { font_size: 15 },
                             color: (SMALL_STATE_TEXT_COLOR)
                         }
-                        text: "No preview available"
+                        text: #(crate::i18n::tr("No preview available")) i18n_text: "No preview available"
                     }
                 }
             }
@@ -305,14 +305,14 @@ script_mod! {
 
             cancel_button := RobrixNeutralIconButton {
                 padding: 13
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             upload_button := RobrixPositiveIconButton {
                 padding: 13
                 draw_icon +: { svg: (ICON_UPLOAD) }
                 icon_walk: Walk{width: 16, height: Fit, margin: Inset{right: 4}}
-                text: "Upload"
+                text: #(crate::i18n::tr("Upload")) i18n_text: "Upload"
             }
         }
     }
@@ -584,9 +584,9 @@ impl FileUploadModal {
         let size = file_data.size;
 
         let (title, upload_button_text) = if is_avatar {
-            ("Upload Avatar", "Set Avatar")
+            (crate::i18n::tr("Upload Avatar"), "Set Avatar")
         } else {
-            ("Upload File", "Upload")
+            (crate::i18n::tr("Upload File"), crate::i18n::tr("Upload"))
         };
         self.label(cx, ids!(title)).set_text(cx, title);
         self.button(cx, ids!(upload_button)).set_text(cx, upload_button_text);

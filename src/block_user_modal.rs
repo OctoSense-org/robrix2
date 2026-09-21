@@ -21,7 +21,7 @@ script_mod! {
             draw_text +: {
                 color: (COLOR_FG_DANGER_RED)
             }
-            text: "Changing your blocked users will reload all room timelines from scratch. You may lose your viewing position in each room."
+            text: #(crate::i18n::tr("Changing your blocked users will reload all room timelines from scratch. You may lose your viewing position in each room.")) i18n_text: "Changing your blocked users will reload all room timelines from scratch. You may lose your viewing position in each room."
         }
 
         buttons_view := ModalButtonsRow {
@@ -31,7 +31,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_CLOSE)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             block_button := RobrixNegativeIconButton {
@@ -41,7 +41,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Block"
+                text: #(crate::i18n::tr("Block")) i18n_text: "Block"
             }
 
             unblock_button := RobrixPositiveIconButton {
@@ -51,7 +51,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Unblock"
+                text: #(crate::i18n::tr("Unblock")) i18n_text: "Unblock"
             }
         }
     }

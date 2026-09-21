@@ -1,0 +1,1416 @@
+//! Native Moments surfaces; content comes from the active Matrix account.
+use std::{collections::BTreeSet, path::PathBuf};
+use makepad_widgets::*;
+use ruma::{OwnedUserId, OwnedRoomId, OwnedEventId, TransactionId};
+use crate::{
+    sliding_sync::{current_user_id, spawn_async_task},
+    media_cache::{MediaCache, MediaCacheEntry},
+    shared::{
+        navigation_bar_button::NavigationBarButtonAction,
+        text_or_image::{TextOrImageAction, TextOrImageWidgetRefExt, TextOrImageWidgetExt},
+        avatar::AvatarWidgetRefExt,
+        attachment_download::{
+            DownloadableAttachment, DownloadKind, media_source_mxc, start_attachment_download,
+        },
+    },
+    home::back_swipe::BackSwipe,
+};
+use super::{
+    backend::{Service, Feed, Timeline, Pending, ComposerDraft},
+    model::{Entry, Asset, MAX_MEDIA},
+};
+
+#[derive(Clone, Debug)]
+pub enum MomentsAction {
+    Open { author: Option<OwnedUserId> },
+    Compose { text: String },
+    FileTransfer,
+    Close,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Page {
+    #[default]
+    Feed,
+    Compose,
+    Details,
+    Audience,
+    Invitations,
+    Transfer,
+}
+#[derive(Clone, Debug)]
+enum Command {
+    Refresh(bool),
+    Prepare,
+    RetrySetup,
+    Audience,
+    Send(Pending),
+    Retry,
+    Discard,
+    Review(OwnedRoomId, String),
+    Comment(Entry, String),
+    Edit(Entry, String),
+    Like(Entry),
+    Redact(OwnedRoomId, Vec<OwnedEventId>),
+    Invite(OwnedRoomId, OwnedUserId),
+    Remove(OwnedRoomId, OwnedUserId),
+    Invitation(OwnedRoomId, bool),
+    Choose(OwnedRoomId),
+    Hide(OwnedUserId, bool),
+    Seen(Vec<OwnedEventId>),
+    FileTransfer(bool),
+}
+#[derive(Clone, Debug)]
+enum Outcome {
+    Feed(Feed),
+    Ready(Timeline),
+    Changed,
+    Sent,
+    Transfer(OwnedRoomId),
+}
+#[derive(Clone, Debug)]
+struct Completed {
+    owner: OwnedUserId,
+    request: u64,
+    result: Result<Outcome, String>,
+}
+#[derive(Clone, Debug)]
+struct Picked {
+    owner: OwnedUserId,
+    session: u64,
+    result: Result<PathBuf, String>,
+}
+const CAPTION: f64 = if cfg!(target_os = "macos") { 28.0 } else { 0.0 };
+
+script_mod! {
+    use mod.prelude.widgets.*
+    use mod.widgets.*
+    let ActionButton = RobrixNeutralIconButton {width: Fill height: 40 spacing: 0 icon_walk: Walk{width: 0 height: 0}
+        draw_bg +: {color: #x00000000 color_hover: #xe4e4e4 color_down: #xd0d0d0}
+    }
+    let Hint = Label {width: Fill height: Fit flow: Flow.Right{wrap: true} draw_text +: {color: #x888888 text_style: theme.font_regular{font_size: 10}}}
+    let Body = Label {width: Fill height: Fit flow: Flow.Right{wrap: true} draw_text +: {color: #x191919 text_style: theme.font_regular{font_size: 12}}}
+    let Photo = TextOrImage {width: Fill height: 82
+        image_view +: {height: Fill image +: {height: Fill fit: ImageFit.Smallest}}
+        text_view +: {height: Fill label +: {max_lines: 2 draw_text.text_style.font_size: 9}}
+    }
+    mod.widgets.MomentsPanel = #(MomentsPanel::register_widget(vm)) {
+        ..mod.widgets.SolidView
+        width: Fill height: Fill flow: Down draw_bg.color: #xededed
+        padding: Inset{top: SAFE_INSET_PAD_TOP + #(CAPTION) bottom: SAFE_INSET_PAD_BOTTOM}
+        header := DetailHeader {title.text: #(crate::i18n::tr("Moments")) title.i18n_text: "Moments"}
+        moments_status := Hint {margin: Inset{left: 16 right: 16 top: 6 bottom: 6}}
+        feed_page := View {width: Fill height: Fill flow: Down
+            View {width: Fill height: 40 flow: Right padding: Inset{left: 10 right: 10}
+                moments_refresh := ActionButton {text: #(crate::i18n::tr("Refresh")) i18n_text: "Refresh"}
+                moments_invites := ActionButton {text: #(crate::i18n::tr("Invitations")) i18n_text: "Invitations"}
+                moments_audience := ActionButton {text: #(crate::i18n::tr("Audience")) i18n_text: "Audience"}
+                moments_compose := RobrixPositiveIconButton {text: #(crate::i18n::tr("Post")) i18n_text: "Post" width: 60 height: 36 spacing: 0 icon_walk: Walk{width: 0 height: 0}}
+            }
+            moments_feed := PortalList {width: Fill height: Fill
+                Cover := SolidView {width: Fill height: 158 flow: Down padding: 22 align: Align{y: 1.0} spacing: 8
+                    draw_bg.color: #x344d43
+                    cover_name := Label {width: Fill flow: Flow.Right{wrap: true} draw_text +: {color: #xffffff text_style: theme.font_bold{font_size: 19}}}
+                    Label {text: #(crate::i18n::tr("Small moments, shared with friends")) i18n_text: "Small moments, shared with friends" draw_text +: {color: #xc5d9cd text_style: theme.font_regular{font_size: 10}}}
+                }
+                Post := NavigationBarButton {width: Fill height: Fit flow: Right padding: 16 spacing: 12 align: Align{x: 0.0 y: 0.0}
+                    draw_bg +: {color_hover: #xf4f4f4 border_radius: 0 get_color: fn() -> vec4{return #xffffff.mix(self.color_hover,self.hover)}}
+                    post_avatar := MobileAvatar {width: 38 height: 38}
+                    View {width: Fill height: Fit flow: Down spacing: 10
+                    post_author := Label {width: Fill max_lines: 1 text_overflow: Ellipsis draw_text +: {color: #x576b95 text_style: theme.font_bold{font_size: 12}}}
+                    post_body := Body {max_lines: 6 text_overflow: Ellipsis}
+                    album := View {width: Fill height: Fit flow: Down spacing: 4 visible: false
+                        row0 := View {width: Fill height: 82 flow: Right spacing: 4 a0 := Photo{} a1 := Photo{} a2 := Photo{}}
+                        row1 := View {width: Fill height: 82 flow: Right spacing: 4 a3 := Photo{} a4 := Photo{} a5 := Photo{}}
+                        row2 := View {width: Fill height: 82 flow: Right spacing: 4 a6 := Photo{} a7 := Photo{} a8 := Photo{}}
+                    }
+                    post_meta := Hint {}
+                    post_interactions := Hint {draw_text.color: #x576b95}
+                    SolidView {width: Fill height: 0.5 draw_bg.color: #xe5e5e5}
+                    }
+                }
+                Filler := SolidView {width: Fill height: 100 draw_bg.color: #xffffff}
+                Empty := View {width: Fill height: Fit padding: 24
+                    empty_text := Body {text: #(crate::i18n::tr("No posts yet. Post your first moment, or accept a friend's timeline invitation.")) i18n_text: "No posts yet. Post your first moment, or accept a friend's timeline invitation."}
+                }
+            }
+            moments_more := ActionButton {text: #(crate::i18n::tr("Load older / more timelines")) i18n_text: "Load older / more timelines"}
+        }
+        compose_page := ScrollYView {visible: false width: Fill height: Fill flow: Down padding: 16 spacing: 14
+            composer_audience := Body {draw_text.color: #x576b95}
+            Hint {text: #(crate::i18n::tr("Everyone in this timeline can see its posts, comments, likes and members. Invitations apply to this whole timeline. Earlier history may be unavailable to new viewers.")) i18n_text: "Everyone in this timeline can see its posts, comments, likes and members. Invitations apply to this whole timeline. Earlier history may be unavailable to new viewers."}
+            moments_body := TextInput {width: Fill height: 150 empty_text: #(crate::i18n::tr("What's on your mind?")) i18n_empty_text: "What's on your mind?" is_multiline: true}
+            selected_media := Hint {}
+            View {width: Fill height: 40 flow: Right spacing: 8
+                moments_add_media := ActionButton {text: #(crate::i18n::tr("Add photo / video")) i18n_text: "Add photo / video"}
+                moments_clear_media := ActionButton {text: #(crate::i18n::tr("Clear media")) i18n_text: "Clear media"}
+            }
+            compose_audience := ActionButton {text: #(crate::i18n::tr("Review Timeline Audience")) i18n_text: "Review Timeline Audience"}
+            moments_publish := RobrixPositiveIconButton {text: #(crate::i18n::tr("Post")) i18n_text: "Post" width: Fill height: 44 spacing: 0 icon_walk: Walk{width: 0 height: 0}}
+            moments_retry := ActionButton {text: #(crate::i18n::tr("Retry saved post / comment")) i18n_text: "Retry saved post / comment" visible: false}
+            moments_discard := ActionButton {text: #(crate::i18n::tr("Discard saved retry")) i18n_text: "Discard saved retry" visible: false}
+            retry_hint := Hint {visible: false text: #(crate::i18n::tr("Discarding stops retries. It cannot unsend content already delivered.")) i18n_text: "Discarding stops retries. It cannot unsend content already delivered."}
+            Hint {text: #(crate::i18n::tr("Posts and comments are encrypted. Standard Matrix likes expose reaction metadata. Files are limited to nine items, 25 MB each.")) i18n_text: "Posts and comments are encrypted. Standard Matrix likes expose reaction metadata. Files are limited to nine items, 25 MB each."}
+        }
+        details_page := View {visible: false width: Fill height: Fill flow: Down
+            details_scroll := ScrollYView {width: Fill height: Fill flow: Down padding: 16 spacing: 14
+                detail_author := Body {draw_text.color: #x576b95}
+                detail_body := Body {}
+                detail_media := TextOrImage {width: Fill height: 260 visible: false image_view +: {height: Fill image +: {height: Fill fit: ImageFit.Smallest}}}
+                media_controls := View {width: Fill height: 40 flow: Right spacing: 8 visible: false
+                    media_previous := ActionButton {text: #(crate::i18n::tr("Previous")) i18n_text: "Previous"}
+                    media_download := ActionButton {text: #(crate::i18n::tr("Download")) i18n_text: "Download"}
+                    media_next := ActionButton {text: #(crate::i18n::tr("Next")) i18n_text: "Next"}
+                }
+                detail_meta := Hint {}
+                detail_likes := Body {draw_text.color: #x576b95}
+                View {width: Fill height: 40 flow: Right spacing: 8
+                    moments_like := ActionButton {text: #(crate::i18n::tr("Like")) i18n_text: "Like"}
+                    moments_hide := ActionButton {text: #(crate::i18n::tr("Hide author")) i18n_text: "Hide author"}
+                }
+                owner_actions := View {width: Fill height: 40 flow: Right spacing: 8
+                    moments_edit := ActionButton {text: #(crate::i18n::tr("Edit post")) i18n_text: "Edit post"}
+                    moments_delete := ActionButton {text: #(crate::i18n::tr("Delete post")) i18n_text: "Delete post" draw_text.color: #xfa5151}
+                }
+                Body {text: #(crate::i18n::tr("Comments")) i18n_text: "Comments"}
+                comments := PortalList {width: Fill height: 220
+                    Comment := View {width: Fill height: Fit flow: Down padding: Inset{top: 8 bottom: 8} spacing: 4
+                        comment_name := Hint {draw_text.color: #x576b95}
+                        comment_body := Body {}
+                        comment_actions := View {width: Fill height: 32 flow: Right
+                            comment_edit := ActionButton {text: #(crate::i18n::tr("Edit")) i18n_text: "Edit" height: 32}
+                            comment_delete := ActionButton {text: #(crate::i18n::tr("Delete")) i18n_text: "Delete" height: 32}
+                        }
+                    }
+                }
+            }
+            editor_hint := Hint {visible: false margin: Inset{left: 16 right: 16}}
+            View {width: Fill height: 54 flow: Right padding: 8 spacing: 8
+                moments_comment := TextInput {width: Fill height: Fill empty_text: #(crate::i18n::tr("Comment")) i18n_empty_text: "Comment"}
+                moments_comment_send := RobrixPositiveIconButton {text: #(crate::i18n::tr("Send")) i18n_text: "Send" width: 60 height: Fill spacing: 0 icon_walk: Walk{width: 0 height: 0}}
+            }
+        }
+        audience_page := View {visible: false width: Fill height: Fill flow: Down padding: 16 spacing: 12
+            Hint {text: #(crate::i18n::tr("One audience for all your posts. Viewers see each other's comments, likes and membership. Removing a viewer prevents future access after sync; it cannot recall content already received.")) i18n_text: "One audience for all your posts. Viewers see each other's comments, likes and membership. Removing a viewer prevents future access after sync; it cannot recall content already received."}
+            audience_name := Body {draw_text.color: #x576b95}
+            setup_recovery := View {visible: false width: Fill height: Fit flow: Down spacing: 6
+                Hint {text: #(crate::i18n::tr("If earlier setup never completed, retry after reconnecting. Any duplicate timelines stay separate; their audiences will never be merged.")) i18n_text: "If earlier setup never completed, retry after reconnecting. Any duplicate timelines stay separate; their audiences will never be merged."}
+                moments_retry_setup := ActionButton {text: #(crate::i18n::tr("Retry timeline setup")) i18n_text: "Retry timeline setup"}
+            }
+            audience_list := PortalList {width: Fill height: Fill
+                Member := View {width: Fill height: Fit flow: Down padding: Inset{top: 8 bottom: 8} spacing: 5
+                    member_name := Body {} member_id := Hint {}
+                    remove_viewer := ActionButton {text: #(crate::i18n::tr("Remove viewer")) i18n_text: "Remove viewer" height: 32 draw_text.color: #xfa5151}
+                }
+                Choice := View {width: Fill height: Fit flow: Down spacing: 6 padding: 8
+                    choice_name := Body {} choose_timeline := ActionButton {text: #(crate::i18n::tr("Use this timeline")) i18n_text: "Use this timeline"}
+                }
+                Hidden := View {width: Fill height: Fit flow: Down spacing: 6 padding: 8
+                    hidden_name := Body {} unhide_author := ActionButton {text: #(crate::i18n::tr("Show author in feed")) i18n_text: "Show author in feed"}
+                }
+            }
+            audience_invite_controls := View {width: Fill height: 40 flow: Right spacing: 8
+                audience_user := TextInput {width: Fill height: Fill empty_text: #(crate::i18n::tr("@friend:homeserver")) i18n_empty_text: "@friend:homeserver" autocapitalize: None}
+                audience_invite := ActionButton {text: #(crate::i18n::tr("Invite")) i18n_text: "Invite" width: 65}
+            }
+            audience_review := ActionButton {text: #(crate::i18n::tr("Confirm audience for saved retry")) i18n_text: "Confirm audience for saved retry"}
+        }
+        invitations_page := View {visible: false width: Fill height: Fill flow: Down padding: 16 spacing: 12
+            Hint {text: #(crate::i18n::tr("Join only if you want to read this person's Moments. Other viewers can see your membership, comments and likes. This does not grant them access to your own posts.")) i18n_text: "Join only if you want to read this person's Moments. Other viewers can see your membership, comments and likes. This does not grant them access to your own posts."}
+            invitation_list := PortalList {width: Fill height: Fill
+                Invitation := View {width: Fill height: Fit flow: Down padding: 10 spacing: 10
+                    invitation_author := Body {}
+                    View {width: Fill height: 40 flow: Right spacing: 8
+                        accept_moments := ActionButton {text: #(crate::i18n::tr("Join timeline")) i18n_text: "Join timeline"}
+                        reject_moments := ActionButton {text: #(crate::i18n::tr("Decline")) i18n_text: "Decline"}
+                    }
+                }
+            }
+            invitation_empty := Body {text: #(crate::i18n::tr("No timeline invitations.")) i18n_text: "No timeline invitations."}
+        }
+        transfer_page := View {visible: false width: Fill height: Fill flow: Down padding: 20 spacing: 16
+            Body {text: #(crate::i18n::tr("File Transfer is a private chat for your own devices. It is separate from Moments.")) i18n_text: "File Transfer is a private chat for your own devices. It is separate from Moments."}
+            transfer_retry := ActionButton {text: #(crate::i18n::tr("Open File Transfer")) i18n_text: "Open File Transfer"}
+            transfer_new := ActionButton {text: #(crate::i18n::tr("New Private File Transfer")) i18n_text: "New Private File Transfer"}
+        }
+    }
+}
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct MomentsPanel {
+    #[source]
+    source: ScriptObjectRef,
+    #[deref]
+    view: View,
+    #[rust]
+    owner: Option<OwnedUserId>,
+    #[rust]
+    author: Option<OwnedUserId>,
+    #[rust]
+    feed: Feed,
+    #[rust]
+    posts: Vec<Entry>,
+    #[rust]
+    page: Page,
+    #[rust]
+    audience_return: Page,
+    #[rust]
+    timeline: Option<Timeline>,
+    #[rust]
+    detail: Option<Entry>,
+    #[rust]
+    editing: Option<Entry>,
+    #[rust]
+    comments: Vec<Entry>,
+    #[rust]
+    paths: Vec<PathBuf>,
+    #[rust]
+    media: Option<MediaCache>,
+    #[rust]
+    media_index: usize,
+    #[rust]
+    busy: bool,
+    #[rust]
+    mutating: bool,
+    #[rust]
+    timer: Timer,
+    #[rust]
+    pending: Option<Pending>,
+    #[rust]
+    request: u64,
+    #[rust]
+    session: u64,
+    #[rust]
+    status: String,
+    #[rust]
+    back_swipe: BackSwipe,
+}
+fn next_request() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+impl MomentsPanel {
+    fn save_draft(&self, cx: &mut Cx) {
+        let Some(owner) = &self.owner else { return };
+        if self.pending.is_some() {
+            return;
+        }
+        let body = self.text_input(cx, ids!(moments_body)).text();
+        let path = crate::persistence::persistent_state_dir(owner).join("moments-composer.json");
+        if body.is_empty() && self.paths.is_empty() {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+        if let Err(e) = super::backend::write_private(
+            &path,
+            &ComposerDraft {
+                body,
+                paths: self.paths.clone(),
+            },
+        ) {
+            crate::shared::popup_list::enqueue_popup_notification(
+                crate::i18n::format("Could not save Moments draft: {e}", &[("e", (e).to_string())]),
+                crate::shared::popup_list::PopupKind::Error,
+                Some(5.0),
+            );
+        }
+    }
+    fn restore_draft(&mut self, cx: &mut Cx) {
+        let Some(owner) = &self.owner else { return };
+        let path = crate::persistence::persistent_state_dir(owner).join("moments-composer.json");
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(draft) = serde_json::from_slice::<ComposerDraft>(&bytes) {
+                self.text_input(cx, ids!(moments_body))
+                    .set_text(cx, &draft.body);
+                self.paths = draft.paths;
+            }
+        }
+    }
+    fn reset(&mut self, cx: &mut Cx) {
+        self.save_draft(cx);
+        cx.stop_timer(self.timer);
+        self.pending = None;
+        self.owner = None;
+        self.author = None;
+        self.feed = Feed::default();
+        self.posts.clear();
+        self.timeline = None;
+        self.detail = None;
+        self.editing = None;
+        self.comments.clear();
+        self.paths.clear();
+        self.media = None;
+        self.page = Page::Feed;
+        self.busy = false;
+        self.request = next_request();
+        self.session = next_request();
+        self.status.clear();
+        self.text_input(cx, ids!(moments_body)).set_text(cx, "");
+        self.text_input(cx, ids!(moments_comment)).set_text(cx, "");
+    }
+    fn run(&mut self, cx: &mut Cx, command: Command) {
+        if self.busy && (self.mutating || matches!(command, Command::Refresh(_))) {
+            return;
+        }
+        let Some(service) = Service::current() else {
+            return;
+        };
+        self.busy = true;
+        self.mutating = !matches!(command, Command::Refresh(_));
+        self.request = next_request();
+        let request = self.request;
+        let owner = service.owner.clone();
+        let feed = self.feed.clone();
+        self.status = match &command {
+            Command::Send(_) => crate::i18n::tr("Encrypting and publishing…"),
+            Command::FileTransfer(_) => crate::i18n::tr("Opening private File Transfer…"),
+            _ => crate::i18n::tr("Updating Moments…"),
+        }
+        .into();
+        spawn_async_task(async move {
+            let result=async {
+                Ok(match command {
+                    Command::Refresh(older)=>Outcome::Feed(service.load(feed,older).await?),
+                    Command::Prepare=>{let id=if let Some(p)=service.pending()?.filter(|p|p.confirmed.is_none()){p.room}else{service.ensure_timeline().await?};Outcome::Ready(service.validate(&id).await?)},
+                    Command::RetrySetup=>{let id=service.retry_timeline_setup().await?;Outcome::Ready(service.validate(&id).await?)},
+                    Command::Audience=>{let id=if let Some(p)=service.pending()?.filter(|p|p.confirmed.is_none()){p.room}else{service.ensure_timeline().await?};Outcome::Ready(service.validate(&id).await?)},
+                    Command::Send(p)=>{service.send(p).await?;Outcome::Sent},
+                    Command::Retry=>{let p=service.pending()?.ok_or_else(||anyhow::anyhow!(crate::i18n::tr("No saved operation to retry.")))?;service.send(p).await?;Outcome::Sent},
+                    Command::Discard=>{service.discard_pending().await?;Outcome::Changed},
+                    Command::Review(room,audience)=>{service.review_pending(&room,&audience).await?;Outcome::Changed},
+                    Command::Comment(post,body)=>{service.interact(&post,super::model::comment_content(&body,&post.id),"m.room.message",TransactionId::new()).await?;Outcome::Sent},
+                    Command::Edit(entry,body)=>{
+                        anyhow::ensure!(entry.sender==service.owner,crate::i18n::tr("Only your own text can be edited."));
+                        let timeline=service.validate(&entry.room).await?;let mut content=entry.content.clone();content["body"]=serde_json::json!(body);
+                        let wire=serde_json::json!({"msgtype":"m.text","body":format!("* {body}"),"m.new_content":content,"m.relates_to":{"rel_type":"m.replace","event_id":entry.id}});
+                        service.send(Pending{transaction:TransactionId::new(),room:entry.room,audience:timeline.audience,event_type:"m.room.message".into(),content:wire,is_post:false,paths:vec![],assets:vec![],confirmed:None}).await?;Outcome::Sent
+                    },
+                    Command::Like(post)=>{service.like(&post,TransactionId::new()).await?;Outcome::Changed},
+                    Command::Redact(room,ids)=>{service.redact(&room,ids).await?;Outcome::Changed},
+                    Command::Invite(room,user)=>{service.membership(&room,&user,true).await?;Outcome::Ready(service.validate(&room).await?)},
+                    Command::Remove(room,user)=>{service.membership(&room,&user,false).await?;Outcome::Ready(service.validate(&room).await?)},
+                    Command::Invitation(room,accept)=>{service.invitation(&room,accept).await?;let mut feed=feed;feed.timelines.remove(&room);Outcome::Feed(service.load(feed,false).await?)},
+                    Command::Choose(room)=>{service.choose(room.clone()).await?;Outcome::Ready(service.validate(&room).await?)},
+                    Command::Hide(author,hidden)=>{service.hide(author,hidden).await?;Outcome::Feed(service.load(feed,false).await?)},
+                    Command::Seen(ids)=>{service.mark_seen(ids).await?;Outcome::Changed},
+                    Command::FileTransfer(new)=>Outcome::Transfer(if new {service.new_file_transfer().await?}else{service.file_transfer().await?}),
+                })
+            }.await.map_err(|e:anyhow::Error|e.to_string());
+            Cx::post_action(Completed {
+                owner,
+                request,
+                result,
+            });
+        });
+        self.redraw(cx);
+    }
+    fn back(&mut self, cx: &mut Cx) {
+        if self.editing.take().is_some() {
+            self.text_input(cx, ids!(moments_comment)).set_text(cx, "");
+            self.redraw(cx);
+            return;
+        }
+        if self.page == Page::Feed || self.page == Page::Transfer {
+            cx.action(MomentsAction::Close);
+            return;
+        }
+        self.page = if self.page == Page::Audience {
+            self.audience_return
+        } else {
+            Page::Feed
+        };
+        self.redraw(cx);
+    }
+    fn open_detail(&mut self, cx: &mut Cx, post: Entry) {
+        self.media_index = 0;
+        self.editing = None;
+        self.page = Page::Details;
+        self.detail = Some(post.clone());
+        self.text_input(cx, ids!(moments_comment)).set_text(cx, "");
+        if !self.feed.preferences.seen.contains(&post.id) {
+            self.feed.preferences.seen.insert(post.id.clone());
+            self.run(cx, Command::Seen(vec![post.id]));
+        }
+        self.redraw(cx);
+    }
+    fn pick_media(&mut self) {
+        if self.paths.len() >= MAX_MEDIA {
+            self.status = crate::i18n::tr("Choose at most nine photos or videos.").into();
+            return;
+        }
+        let Some(owner) = self.owner.clone() else {
+            return;
+        };
+        let session = self.session;
+        let result = robius_file_picker::FileDialog::new().pick_image_or_video(move |picked| {
+            let result = (|| -> Result<Option<PathBuf>, String> {
+                let Some(file) = picked.map_err(|e| e.to_string())? else {
+                    return Ok(None);
+                };
+                let local = file.into_local_file().map_err(|e| e.to_string())?;
+                let size = std::fs::metadata(local.path())
+                    .map_err(|e| e.to_string())?
+                    .len();
+                if size > 25 * 1024 * 1024 {
+                    return Err(crate::i18n::tr("Each photo or video must be at most 25 MB.").into());
+                }
+                let dir = crate::persistence::persistent_state_dir(&owner)
+                    .join("moments-drafts")
+                    .join(TransactionId::new().as_str());
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let path = dir.join(local.path().file_name().unwrap_or_default());
+                std::fs::copy(local.path(), &path).map_err(|e| e.to_string())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(Some(path))
+            })();
+            match result {
+                Ok(None) => {}
+                Ok(Some(path)) => Cx::post_action(Picked {
+                    owner,
+                    session,
+                    result: Ok(path),
+                }),
+                Err(e) => Cx::post_action(Picked {
+                    owner,
+                    session,
+                    result: Err(e),
+                }),
+            }
+        });
+        if let Err(e) = result {
+            self.status = e.to_string();
+        }
+    }
+    fn show_media(
+        cx: &mut Cx,
+        widget: &crate::shared::text_or_image::TextOrImageRef,
+        asset: &Asset,
+        cache: &mut MediaCache,
+        full: bool,
+    ) {
+        use matrix_sdk::media::MediaFormat;
+        if !asset.mimetype.starts_with("image/") {
+            widget.show_text(cx, &crate::i18n::format("Video · {0}", &[("0", (asset.name).to_string())]));
+            return;
+        }
+        let source = ruma::events::room::MediaSource::Encrypted(Box::new(asset.file.clone()));
+        let format = if full {
+            MediaFormat::File
+        } else {
+            MediaFormat::Thumbnail(matrix_sdk::media::MediaThumbnailSettings::new(
+                ruma::uint!(240),
+                ruma::uint!(240),
+            ))
+        };
+        match cache.try_get_media_or_fetch(&source, format) {
+            (MediaCacheEntry::Loaded(data), _) => {
+                let key = format!("{}#moments-{full}", media_source_mxc(&source));
+                if widget
+                    .show_image(cx, Some(source), |cx, img| {
+                        crate::utils::load_image_with_cache_key(
+                            &img,
+                            cx,
+                            std::path::Path::new(&key),
+                            data,
+                        )
+                        .map(|()| img.size_in_pixels(cx).unwrap_or_default())
+                    })
+                    .is_err()
+                {
+                    widget.show_text(cx, crate::i18n::tr("Image unavailable"));
+                }
+            }
+            (MediaCacheEntry::Requested, _) => widget.show_text(cx, crate::i18n::tr("Loading photo…")),
+            (MediaCacheEntry::Failed(_), _) => {
+                widget.show_text(cx, crate::i18n::tr("Photo unavailable · reopen to retry"))
+            }
+        }
+    }
+}
+
+impl Widget for MomentsPanel {
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        if self.owner.is_none() {
+            return;
+        }
+        if self.owner != current_user_id() {
+            self.reset(cx);
+            cx.action(MomentsAction::Close);
+            return;
+        }
+        if event.back_pressed()
+            || matches!(
+                event,
+                Event::KeyDown(KeyEvent {
+                    key_code: KeyCode::Escape,
+                    ..
+                })
+            )
+            || matches!(event,Event::Scroll(e) if self.back_swipe.update(e))
+        {
+            self.back(cx);
+            return;
+        }
+        if self.timer.is_event(event).is_some()
+            && !self.busy
+            && self.status.is_empty()
+            && matches!(self.page, Page::Feed | Page::Details)
+        {
+            self.run(cx, Command::Refresh(false));
+        }
+        self.view.handle_event(cx, event, scope);
+        if matches!(event, Event::Signal) {
+            self.redraw(cx);
+        }
+        let Event::Actions(actions) = event else {
+            return;
+        };
+        for action in actions {
+            if let Some(done) = action.downcast_ref::<Completed>() {
+                if Some(&done.owner) != self.owner.as_ref() || done.request != self.request {
+                    continue;
+                }
+                self.busy = false;
+                self.pending = Service::current()
+                    .and_then(|s| s.pending().ok().flatten())
+                    .filter(|p| p.confirmed.is_none());
+                match &done.result {
+                    Err(e) => self.status = crate::i18n::format("{e} Refresh or retry to continue.", &[("e", (e).to_string())]),
+                    Ok(Outcome::Feed(feed)) => {
+                        self.feed = feed.clone();
+                        self.status = feed.errors.join("\n");
+                    }
+                    Ok(Outcome::Ready(t)) => {
+                        self.timeline = Some(t.clone());
+                        self.status.clear();
+                        if self.page == Page::Compose {
+                            if let Some(p) = &self.pending {
+                                let body = p
+                                    .content
+                                    .pointer("/m.new_content/body")
+                                    .or_else(|| p.content.get("body"))
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or(crate::i18n::tr("Saved reaction"))
+                                    .to_owned();
+                                self.text_input(cx, ids!(moments_body)).set_text(cx, &body);
+                                self.status = crate::i18n::tr("A saved send is waiting. Retry sends its saved content. Discard the retry to write a new post.").into();
+                            }
+                        }
+                    }
+                    Ok(Outcome::Changed) => {
+                        self.status = crate::i18n::tr("Updated.").into();
+                        if self.page == Page::Details || self.page == Page::Feed {
+                            self.run(cx, Command::Refresh(false));
+                        }
+                    }
+                    Ok(Outcome::Sent) => {
+                        self.status = crate::i18n::tr("Sent.").into();
+                        self.editing = None;
+                        if self.page == Page::Compose {
+                            self.page = Page::Feed;
+                            self.text_input(cx, ids!(moments_body)).set_text(cx, "");
+                            self.paths.clear();
+                        }
+                        self.text_input(cx, ids!(moments_comment)).set_text(cx, "");
+                        self.run(cx, Command::Refresh(false));
+                    }
+                    Ok(Outcome::Transfer(id)) => {
+                        cx.widget_action(
+                            self.widget_uid(),
+                            crate::home::rooms_list::RoomsListAction::Selected(
+                                crate::app::SelectedRoom::JoinedRoom {
+                                    room_name_id: crate::utils::RoomNameId::from((
+                                        Some(matrix_sdk::RoomDisplayName::Named(
+                                            crate::i18n::tr("File Transfer").into(),
+                                        )),
+                                        id.clone(),
+                                    )),
+                                },
+                            ),
+                        );
+                        cx.action(MomentsAction::Close);
+                    }
+                }
+                self.redraw(cx);
+            }
+            if let Some(picked) = action.downcast_ref::<Picked>() {
+                if Some(&picked.owner) == self.owner.as_ref() && picked.session == self.session {
+                    match &picked.result {
+                        Ok(path) => {
+                            self.paths.push(path.clone());
+                            self.save_draft(cx);
+                        }
+                        Err(e) => self.status = e.clone(),
+                    }
+                    self.redraw(cx);
+                }
+            }
+        }
+        if self.button(cx, ids!(header.back)).clicked(actions) {
+            self.back(cx);
+            return;
+        }
+        if self.busy && self.mutating {
+            return;
+        }
+        match self.page {
+            Page::Feed => {
+                if self.button(cx, ids!(moments_refresh)).clicked(actions) {
+                    self.run(cx, Command::Refresh(false));
+                }
+                if self.button(cx, ids!(moments_more)).clicked(actions) {
+                    self.run(cx, Command::Refresh(true));
+                }
+                if self.button(cx, ids!(moments_compose)).clicked(actions) {
+                    self.page = Page::Compose;
+                    self.run(cx, Command::Prepare);
+                }
+                if self.button(cx, ids!(moments_audience)).clicked(actions) {
+                    self.audience_return = Page::Feed;
+                    self.page = Page::Audience;
+                    self.run(cx, Command::Audience);
+                }
+                if self.button(cx, ids!(moments_invites)).clicked(actions) {
+                    self.page = Page::Invitations;
+                    self.run(cx, Command::Refresh(false));
+                }
+                let list = self.portal_list(cx, ids!(moments_feed));
+                let mut used = BTreeSet::new();
+                for (index, row) in list.items_with_actions(actions) {
+                    if !used.insert(index) || list.was_scrolling() {
+                        continue;
+                    }
+                    let photo_clicked = [
+                        ids!(a0),
+                        ids!(a1),
+                        ids!(a2),
+                        ids!(a3),
+                        ids!(a4),
+                        ids!(a5),
+                        ids!(a6),
+                        ids!(a7),
+                        ids!(a8),
+                    ]
+                    .into_iter()
+                    .position(|id| {
+                        let photo = row.text_or_image(cx, id);
+                        actions.iter().any(|a| {
+                            matches!(
+                                a.as_widget_action()
+                                    .widget_uid_eq(photo.widget_uid())
+                                    .cast(),
+                                TextOrImageAction::Clicked(_)
+                            )
+                        })
+                    });
+                    if photo_clicked.is_some()
+                        || actions.iter().any(|a| {
+                            matches!(
+                                a.as_widget_action().widget_uid_eq(row.widget_uid()).cast(),
+                                NavigationBarButtonAction::Clicked
+                            )
+                        })
+                    {
+                        if let Some(post) = index
+                            .checked_sub(1)
+                            .and_then(|i| self.posts.get(i))
+                            .cloned()
+                        {
+                            self.open_detail(cx, post);
+                            self.media_index = photo_clicked.unwrap_or(0);
+                            break;
+                        }
+                    }
+                }
+            }
+            Page::Compose => {
+                if self
+                    .text_input(cx, ids!(moments_body))
+                    .changed(actions)
+                    .is_some()
+                {
+                    self.save_draft(cx);
+                }
+                if self.button(cx, ids!(moments_add_media)).clicked(actions) {
+                    self.pick_media();
+                }
+                if self.button(cx, ids!(moments_clear_media)).clicked(actions) {
+                    self.paths.clear();
+                    self.save_draft(cx);
+                }
+                if self.button(cx, ids!(compose_audience)).clicked(actions) {
+                    self.audience_return = Page::Compose;
+                    self.page = Page::Audience;
+                    self.run(cx, Command::Audience);
+                }
+                if self.button(cx, ids!(moments_discard)).clicked(actions) {
+                    self.run(cx, Command::Discard);
+                }
+                if self.button(cx, ids!(moments_retry)).clicked(actions) {
+                    self.run(cx, Command::Retry);
+                }
+                if self.button(cx, ids!(moments_publish)).clicked(actions) {
+                    let body = self.text_input(cx, ids!(moments_body)).text();
+                    if body.trim().is_empty() && self.paths.is_empty() {
+                        self.status = crate::i18n::tr("Write a post or add a photo.").into();
+                    } else if let Some(t) = &self.timeline {
+                        self.run(
+                            cx,
+                            Command::Send(Pending {
+                                transaction: TransactionId::new(),
+                                room: t.room.clone(),
+                                audience: t.audience.clone(),
+                                event_type: "m.room.message".into(),
+                                content: super::model::post_content(&body, &[]),
+                                is_post: true,
+                                paths: self.paths.clone(),
+                                assets: vec![],
+                                confirmed: None,
+                            }),
+                        );
+                    }
+                }
+            }
+            Page::Details => {
+                if let Some(post) = self.detail.clone() {
+                    if self.button(cx, ids!(moments_like)).clicked(actions) {
+                        let own = self.feed.timelines.get(&post.room).and_then(|t| {
+                            t.index
+                                .likes(&post)
+                                .get(self.owner.as_ref().unwrap())
+                                .cloned()
+                        });
+                        self.run(
+                            cx,
+                            match own {
+                                Some(ids) => Command::Redact(post.room.clone(), ids),
+                                None => Command::Like(post.clone()),
+                            },
+                        );
+                    }
+                    if self.button(cx, ids!(moments_hide)).clicked(actions) {
+                        self.page = Page::Feed;
+                        self.run(cx, Command::Hide(post.sender.clone(), true));
+                    }
+                    if self.button(cx, ids!(moments_edit)).clicked(actions) {
+                        self.text_input(cx, ids!(moments_comment))
+                            .set_text(cx, post.body());
+                        self.editing = Some(post.clone());
+                    }
+                    if self.button(cx, ids!(moments_delete)).clicked(actions) {
+                        self.run(
+                            cx,
+                            Command::Redact(post.room.clone(), vec![post.id.clone()]),
+                        );
+                        self.page = Page::Feed;
+                    }
+                    if self.button(cx, ids!(moments_comment_send)).clicked(actions)
+                        || self
+                            .text_input(cx, ids!(moments_comment))
+                            .returned(actions)
+                            .is_some()
+                    {
+                        let body = self.text_input(cx, ids!(moments_comment)).text();
+                        if !body.trim().is_empty() {
+                            self.run(
+                                cx,
+                                match self.editing.clone() {
+                                    Some(e) => Command::Edit(e, body),
+                                    None => Command::Comment(post.clone(), body),
+                                },
+                            );
+                        }
+                    }
+                    let media = post.media();
+                    if !media.is_empty() {
+                        if self.button(cx, ids!(media_next)).clicked(actions) {
+                            self.media_index = (self.media_index + 1) % media.len();
+                        }
+                        if self.button(cx, ids!(media_previous)).clicked(actions) {
+                            self.media_index = (self.media_index + media.len() - 1) % media.len();
+                        }
+                        if self.button(cx, ids!(media_download)).clicked(actions) {
+                            let a = &media[self.media_index];
+                            start_attachment_download(
+                                DownloadableAttachment {
+                                    media_source: ruma::events::room::MediaSource::Encrypted(
+                                        Box::new(a.file.clone()),
+                                    ),
+                                    filename: a.name.clone(),
+                                    size: Some(a.size),
+                                    kind: if a.mimetype.starts_with("video/") {
+                                        DownloadKind::Video
+                                    } else {
+                                        DownloadKind::Image
+                                    },
+                                },
+                                None,
+                            );
+                        }
+                    }
+                    let mut used = BTreeSet::new();
+                    for (index, row) in self
+                        .portal_list(cx, ids!(comments))
+                        .items_with_actions(actions)
+                    {
+                        if !used.insert(index) {
+                            continue;
+                        }
+                        if let Some(comment) = self.comments.get(index).cloned() {
+                            if row.button(cx, ids!(comment_edit)).clicked(actions) {
+                                self.text_input(cx, ids!(moments_comment))
+                                    .set_text(cx, comment.body());
+                                self.editing = Some(comment.clone());
+                            }
+                            if row.button(cx, ids!(comment_delete)).clicked(actions) {
+                                self.run(cx, Command::Redact(comment.room, vec![comment.id]));
+                            }
+                        }
+                    }
+                }
+            }
+            Page::Audience => {
+                if self.button(cx, ids!(moments_retry_setup)).clicked(actions) {
+                    self.run(cx, Command::RetrySetup);
+                }
+                if self.button(cx, ids!(audience_review)).clicked(actions) {
+                    if let Some(t) = &self.timeline {
+                        self.run(cx, Command::Review(t.room.clone(), t.audience.clone()));
+                    }
+                }
+                if self.button(cx, ids!(audience_invite)).clicked(actions) {
+                    match OwnedUserId::try_from(
+                        self.text_input(cx, ids!(audience_user)).text().trim(),
+                    ) {
+                        Ok(user) => {
+                            if let Some(t) = &self.timeline {
+                                self.run(cx, Command::Invite(t.room.clone(), user));
+                            }
+                        }
+                        Err(_) => {
+                            self.status = crate::i18n::tr("Enter a Matrix ID such as @friend:matrix.org.").into()
+                        }
+                    }
+                }
+                let members = self
+                    .timeline
+                    .as_ref()
+                    .map(|t| t.members.clone())
+                    .unwrap_or_default();
+                let choices: Vec<_> = self
+                    .feed
+                    .own(self.owner.as_ref().unwrap())
+                    .iter()
+                    .map(|t| t.room.clone())
+                    .collect();
+                let hidden: Vec<_> = self.feed.preferences.hidden.iter().cloned().collect();
+                let mut used = BTreeSet::new();
+                for (index, row) in self
+                    .portal_list(cx, ids!(audience_list))
+                    .items_with_actions(actions)
+                {
+                    if !used.insert(index) {
+                        continue;
+                    }
+                    if row.button(cx, ids!(remove_viewer)).clicked(actions) {
+                        if let (Some(t), Some(m)) = (&self.timeline, members.get(index)) {
+                            self.run(cx, Command::Remove(t.room.clone(), m.id.clone()));
+                        }
+                    }
+                    if row.button(cx, ids!(choose_timeline)).clicked(actions) {
+                        if let Some(id) = index
+                            .checked_sub(members.len())
+                            .and_then(|i| choices.get(i))
+                        {
+                            self.run(cx, Command::Choose(id.clone()));
+                        }
+                    }
+                    if row.button(cx, ids!(unhide_author)).clicked(actions) {
+                        if let Some(user) = index
+                            .checked_sub(members.len() + choices.len())
+                            .and_then(|i| hidden.get(i))
+                        {
+                            self.run(cx, Command::Hide(user.clone(), false));
+                        }
+                    }
+                }
+            }
+            Page::Invitations => {
+                let invites: Vec<_> = self
+                    .feed
+                    .timelines
+                    .values()
+                    .filter(|t| t.invited)
+                    .map(|t| t.room.clone())
+                    .collect();
+                let mut used = BTreeSet::new();
+                for (index, row) in self
+                    .portal_list(cx, ids!(invitation_list))
+                    .items_with_actions(actions)
+                {
+                    if !used.insert(index) {
+                        continue;
+                    }
+                    if let Some(id) = invites.get(index) {
+                        if row.button(cx, ids!(accept_moments)).clicked(actions) {
+                            self.run(cx, Command::Invitation(id.clone(), true));
+                        }
+                        if row.button(cx, ids!(reject_moments)).clicked(actions) {
+                            self.run(cx, Command::Invitation(id.clone(), false));
+                        }
+                    }
+                }
+            }
+            Page::Transfer => {
+                if self.button(cx, ids!(transfer_retry)).clicked(actions) {
+                    self.run(cx, Command::FileTransfer(false));
+                }
+                if self.button(cx, ids!(transfer_new)).clicked(actions) {
+                    self.run(cx, Command::FileTransfer(true));
+                }
+            }
+        }
+        self.redraw(cx);
+    }
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        if self.owner.is_some() && self.owner != current_user_id() {
+            self.reset(cx);
+        }
+        for (id, page) in [
+            (ids!(feed_page), Page::Feed),
+            (ids!(compose_page), Page::Compose),
+            (ids!(details_page), Page::Details),
+            (ids!(audience_page), Page::Audience),
+            (ids!(invitations_page), Page::Invitations),
+            (ids!(transfer_page), Page::Transfer),
+        ] {
+            self.view(cx, id).set_visible(cx, self.page == page);
+        }
+        self.label(cx, ids!(header.title)).set_text(
+            cx,
+            match self.page {
+                Page::Feed => {
+                    if self.author == self.owner && self.owner.is_some() {
+                        crate::i18n::tr("My Posts")
+                    } else {
+                        crate::i18n::tr("Moments")
+                    }
+                }
+                Page::Compose => crate::i18n::tr("New Moment"),
+                Page::Details => crate::i18n::tr("Moment"),
+                Page::Audience => crate::i18n::tr("Timeline Audience"),
+                Page::Invitations => crate::i18n::tr("Timeline Invitations"),
+                Page::Transfer => crate::i18n::tr("File Transfer"),
+            },
+        );
+        self.posts = self.feed.posts(self.author.as_deref());
+        let unavailable: usize = self
+            .feed
+            .timelines
+            .values()
+            .map(|t| t.index.unavailable())
+            .sum();
+        let unvisited = self.feed.undiscovered
+            + self
+                .feed
+                .timelines
+                .values()
+                .filter(|t| !t.invited && (!t.loaded || t.refresh_cursor.is_some()))
+                .count();
+        let status = if !self.status.is_empty() {
+            self.status.clone()
+        } else if unavailable > 0 {
+            crate::i18n::format("{unavailable} encrypted events unavailable. Refresh after recovering keys.", &[("unavailable", (unavailable).to_string())])
+        } else if unvisited > 0 {
+            crate::i18n::format("{unvisited} timelines not loaded yet. Load more to continue.", &[("unvisited", (unvisited).to_string())])
+        } else {
+            String::new()
+        };
+        self.label(cx, ids!(moments_status)).set_text(cx, &status);
+        self.label(cx, ids!(moments_status))
+            .set_visible(cx, !status.is_empty());
+        let invites: Vec<_> = self
+            .feed
+            .timelines
+            .values()
+            .filter(|t| t.invited)
+            .cloned()
+            .collect();
+        self.button(cx, ids!(moments_invites))
+            .set_text(cx, &crate::i18n::format("Invites ({0})", &[("0", (invites.len()).to_string())]));
+        self.label(cx, ids!(invitation_empty))
+            .set_visible(cx, invites.is_empty());
+        let members = self
+            .timeline
+            .as_ref()
+            .map(|t| t.members.clone())
+            .unwrap_or_default();
+        let manages_audience = self
+            .timeline
+            .as_ref()
+            .is_some_and(|t| Some(&t.author) == self.owner.as_ref());
+        self.view(cx, ids!(audience_invite_controls))
+            .set_visible(cx, manages_audience);
+        self.view(cx, ids!(setup_recovery))
+            .set_visible(cx, self.timeline.is_none() && !self.busy);
+        let choices: Vec<_> = self
+            .owner
+            .as_ref()
+            .map(|o| self.feed.own(o).into_iter().cloned().collect())
+            .unwrap_or_default();
+        let hidden: Vec<_> = self.feed.preferences.hidden.iter().cloned().collect();
+        self.label(cx, ids!(audience_name)).set_text(
+            cx,
+            &self
+                .timeline
+                .as_ref()
+                .map(|t| {
+                    crate::i18n::format("{0} · {1} viewers / invitations", &[("0", (t.name).to_string()), ("1", (t.members.len().saturating_sub(1)).to_string())])
+                })
+                .unwrap_or_else(|| crate::i18n::tr("Choose or create your timeline").into()),
+        );
+        self.label(cx, ids!(composer_audience)).set_text(
+            cx,
+            &crate::i18n::format("Timeline audience: {0}", &[("0", (if members.len() <= 1 {
+                    crate::i18n::tr("Only me").into()
+                } else {
+                    members
+                        .iter()
+                        .filter(|m| Some(&m.id) != self.owner.as_ref())
+                        .map(|m| format!("{}{}", m.name, if m.invited { crate::i18n::tr(" (invited)") } else { "" }))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }).to_string())]),
+        );
+        self.label(cx, ids!(selected_media)).set_text(
+            cx,
+            &crate::i18n::format("{0} / 9 selected\n{1}", &[("0", (self.paths.len()).to_string()), ("1", (self.paths
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .map(|n| n.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(", ")).to_string())]),
+        );
+        let pending = self.pending.is_some();
+        self.button(cx, ids!(moments_publish))
+            .set_visible(cx, !pending);
+        self.button(cx, ids!(moments_publish))
+            .set_enabled(cx, !self.busy && self.timeline.is_some());
+        if let Some(p) = &self.pending {
+            self.button(cx, ids!(moments_retry)).set_text(
+                cx,
+                &crate::i18n::format("Retry saved {0}", &[("0", (if p.is_post { crate::i18n::tr("post") } else { crate::i18n::tr("interaction") }).to_string())]),
+            );
+        }
+        self.button(cx, ids!(moments_retry))
+            .set_visible(cx, pending);
+        self.button(cx, ids!(moments_discard))
+            .set_visible(cx, pending);
+        self.label(cx, ids!(retry_hint)).set_visible(cx, pending);
+        self.button(cx, ids!(audience_review))
+            .set_visible(cx, pending);
+        self.label(cx, ids!(editor_hint))
+            .set_visible(cx, self.editing.is_some());
+        self.label(cx, ids!(editor_hint))
+            .set_text(cx, crate::i18n::tr("Editing your text · Back cancels editing"));
+        if let Some(post) = self.detail.clone() {
+            if let Some(t) = self.feed.timelines.get(&post.room) {
+                if let Some(updated) = t
+                    .index
+                    .posts(&post.room, &t.author)
+                    .into_iter()
+                    .find(|p| p.id == post.id)
+                {
+                    self.detail = Some(updated);
+                } else if t.loaded {
+                    self.detail = None;
+                    self.status = crate::i18n::tr("This post was removed.").into();
+                    self.page = Page::Feed;
+                }
+            }
+        }
+        if let Some(post) = &self.detail {
+            self.label(cx, ids!(detail_author)).set_text(
+                cx,
+                &self
+                    .feed
+                    .timelines
+                    .get(&post.room)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| post.sender.to_string()),
+            );
+            self.label(cx, ids!(detail_body)).set_text(cx, post.body());
+            self.view(cx, ids!(owner_actions))
+                .set_visible(cx, Some(&post.sender) == self.owner.as_ref());
+            self.button(cx, ids!(moments_hide))
+                .set_visible(cx, Some(&post.sender) != self.owner.as_ref());
+            let likes = self
+                .feed
+                .timelines
+                .get(&post.room)
+                .map(|t| t.index.likes(post))
+                .unwrap_or_default();
+            self.button(cx, ids!(moments_like)).set_text(
+                cx,
+                if self.owner.as_ref().is_some_and(|u| likes.contains_key(u)) {
+                    crate::i18n::tr("Unlike")
+                } else {
+                    crate::i18n::tr("Like")
+                },
+            );
+            self.label(cx, ids!(detail_likes)).set_text(
+                cx,
+                &crate::i18n::format("{0} likes{1}", &[("0", (likes.len()).to_string()), ("1", (if likes.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            ": {}",
+                            likes
+                                .keys()
+                                .map(|u| u.localpart())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    }).to_string())]),
+            );
+            self.comments = self
+                .feed
+                .timelines
+                .get(&post.room)
+                .map(|t| t.index.comments(post))
+                .unwrap_or_default();
+            let assets = post.media();
+            self.media_index = self.media_index.min(assets.len().saturating_sub(1));
+            self.view(cx, ids!(media_controls))
+                .set_visible(cx, !assets.is_empty());
+            let preview = self.text_or_image(cx, ids!(detail_media));
+            preview.set_visible(cx, !assets.is_empty());
+            self.label(cx, ids!(detail_meta)).set_text(
+                cx,
+                &format!(
+                    "{}{}{}",
+                    date(post.timestamp),
+                    if post.edited { crate::i18n::tr(" · Edited") } else { "" },
+                    if assets.is_empty() {
+                        String::new()
+                    } else {
+                        crate::i18n::format(" · Media {0} / {1}", &[("0", (self.media_index + 1).to_string()), ("1", (assets.len()).to_string())])
+                    }
+                ),
+            );
+            if let (Some(asset), Some(cache)) = (assets.get(self.media_index), self.media.as_mut())
+            {
+                Self::show_media(cx, &preview, asset, cache, true);
+            }
+        }
+        while let Some(step) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = step.borrow_mut::<PortalList>() else {
+                continue;
+            };
+            match self.page {
+                Page::Feed => {
+                    list.set_item_range(cx, 0, self.posts.len().max(1) + 1);
+                    while let Some(index) = list.next_visible_item(cx) {
+                        if index == 0 {
+                            let row = list.item(cx, index, id!(Cover));
+                            let name = self
+                                .author
+                                .as_ref()
+                                .map(|u| u.localpart().to_owned())
+                                .unwrap_or_else(|| crate::i18n::tr("Moments").into());
+                            row.label(cx, ids!(cover_name)).set_text(cx, &name);
+                            row.draw_all(cx, scope);
+                            continue;
+                        }
+                        let Some(post) = self.posts.get(index - 1) else {
+                            let template = if self.posts.is_empty() && index == 1 {
+                                id!(Empty)
+                            } else {
+                                id!(Filler)
+                            };
+                            list.item(cx, index, template).draw_all(cx, scope);
+                            continue;
+                        };
+                        let row = list.item(cx, index, id!(Post));
+                        let timeline = self.feed.timelines.get(&post.room).unwrap();
+                        row.avatar(cx, ids!(post_avatar))
+                            .show_text(cx, None, None, &timeline.name);
+                        row.label(cx, ids!(post_author))
+                            .set_text(cx, &timeline.name);
+                        row.label(cx, ids!(post_body)).set_text(cx, post.body());
+                        row.label(cx, ids!(post_meta)).set_text(
+                            cx,
+                            &format!(
+                                "{}{}{}",
+                                date(post.timestamp),
+                                if post.edited { crate::i18n::tr(" · Edited") } else { "" },
+                                if self.feed.preferences.seen.contains(&post.id) {
+                                    ""
+                                } else {
+                                    crate::i18n::tr(" · New")
+                                }
+                            ),
+                        );
+                        row.label(cx, ids!(post_interactions)).set_text(
+                            cx,
+                            &crate::i18n::format("{0} likes · {1} comments", &[("0", (timeline.index.likes(post).len()).to_string()), ("1", (timeline.index.comments(post).len()).to_string())]),
+                        );
+                        let media = post.media();
+                        row.view(cx, ids!(album)).set_visible(cx, !media.is_empty());
+                        for (id, n) in [(ids!(row0), 0), (ids!(row1), 3), (ids!(row2), 6)] {
+                            row.view(cx, id).set_visible(cx, media.len() > n);
+                        }
+                        for (i, id) in [
+                            ids!(a0),
+                            ids!(a1),
+                            ids!(a2),
+                            ids!(a3),
+                            ids!(a4),
+                            ids!(a5),
+                            ids!(a6),
+                            ids!(a7),
+                            ids!(a8),
+                        ]
+                        .iter()
+                        .enumerate()
+                        {
+                            let photo = row.text_or_image(cx, *id);
+                            photo.set_visible(cx, i < media.len());
+                            if let (Some(asset), Some(cache)) = (media.get(i), self.media.as_mut())
+                            {
+                                Self::show_media(cx, &photo, asset, cache, false);
+                            }
+                        }
+                        row.draw_all(cx, scope);
+                    }
+                }
+                Page::Details => {
+                    list.set_item_range(cx, 0, self.comments.len());
+                    while let Some(i) = list.next_visible_item(cx) {
+                        if let Some(comment) = self.comments.get(i) {
+                            let row = list.item(cx, i, id!(Comment));
+                            row.label(cx, ids!(comment_name)).set_text(
+                                cx,
+                                &format!(
+                                    "{} · {}",
+                                    comment.sender.localpart(),
+                                    date(comment.timestamp)
+                                ),
+                            );
+                            row.label(cx, ids!(comment_body))
+                                .set_text(cx, comment.body());
+                            row.view(cx, ids!(comment_actions))
+                                .set_visible(cx, Some(&comment.sender) == self.owner.as_ref());
+                            row.draw_all(cx, scope);
+                        }
+                    }
+                }
+                Page::Audience => {
+                    list.set_item_range(cx, 0, members.len() + choices.len() + hidden.len());
+                    while let Some(i) = list.next_visible_item(cx) {
+                        if let Some(member) = members.get(i) {
+                            let row = list.item(cx, i, id!(Member));
+                            row.label(cx, ids!(member_name)).set_text(
+                                cx,
+                                &format!(
+                                    "{}{}",
+                                    member.name,
+                                    if member.invited { crate::i18n::tr(" · Invited") } else { "" }
+                                ),
+                            );
+                            row.label(cx, ids!(member_id))
+                                .set_text(cx, member.id.as_str());
+                            row.button(cx, ids!(remove_viewer)).set_visible(
+                                cx,
+                                manages_audience && Some(&member.id) != self.owner.as_ref(),
+                            );
+                            row.draw_all(cx, scope);
+                        } else if let Some(t) =
+                            i.checked_sub(members.len()).and_then(|n| choices.get(n))
+                        {
+                            let row = list.item(cx, i, id!(Choice));
+                            row.label(cx, ids!(choice_name))
+                                .set_text(cx, &crate::i18n::format("Timeline: {0}", &[("0", (t.room).to_string())]));
+                            row.button(cx, ids!(choose_timeline))
+                                .set_visible(cx, choices.len() > 1);
+                            row.draw_all(cx, scope);
+                        } else if let Some(user) = i
+                            .checked_sub(members.len() + choices.len())
+                            .and_then(|n| hidden.get(n))
+                        {
+                            let row = list.item(cx, i, id!(Hidden));
+                            row.label(cx, ids!(hidden_name))
+                                .set_text(cx, &crate::i18n::format("Hidden: {user}", &[("user", (user).to_string())]));
+                            row.draw_all(cx, scope);
+                        }
+                    }
+                }
+                Page::Invitations => {
+                    list.set_item_range(cx, 0, invites.len());
+                    while let Some(i) = list.next_visible_item(cx) {
+                        if let Some(t) = invites.get(i) {
+                            let row = list.item(cx, i, id!(Invitation));
+                            row.label(cx, ids!(invitation_author)).set_text(
+                                cx,
+                                &crate::i18n::format("{0} invited you to their Moments", &[("0", (t.author).to_string())]),
+                            );
+                            row.draw_all(cx, scope);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        DrawStep::done()
+    }
+}
+fn date(timestamp: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(timestamp.min(i64::MAX as u64) as i64)
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%m/%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+impl MomentsPanelRef {
+    pub fn action(&self, cx: &mut Cx, modal: ModalRef, action: &MomentsAction) {
+        let Some(mut inner) = self.borrow_mut() else {
+            return;
+        };
+        if matches!(action, MomentsAction::Close) {
+            inner.reset(cx);
+            modal.close(cx);
+            return;
+        }
+        inner.reset(cx);
+        inner.owner = current_user_id();
+        inner.restore_draft(cx);
+        inner.media = Some(MediaCache::new(None));
+        inner.timer = cx.start_interval(12.0);
+        inner.pending = Service::current()
+            .and_then(|s| s.pending().ok().flatten())
+            .filter(|p| p.confirmed.is_none());
+        modal.open(cx);
+        match action {
+            MomentsAction::Open { author } => {
+                inner.author = author.clone();
+                inner.run(cx, Command::Refresh(false));
+            }
+            MomentsAction::Compose { text } => {
+                inner.page = Page::Compose;
+                inner.text_input(cx, ids!(moments_body)).set_text(cx, text);
+                inner.run(cx, Command::Prepare);
+            }
+            MomentsAction::FileTransfer => {
+                inner.page = Page::Transfer;
+                inner.run(cx, Command::FileTransfer(false));
+            }
+            MomentsAction::Close => {}
+        }
+    }
+}

@@ -57,7 +57,7 @@ script_mod! {
                 padding: 13,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
         }
 
@@ -85,7 +85,7 @@ script_mod! {
             retry_button := RobrixIconButton {
                 visible: false,
                 padding: 13
-                text: "Retry"
+                text: #(crate::i18n::tr("Retry")) i18n_text: "Retry"
             }
         }
     }

@@ -16,11 +16,11 @@ script_mod! {
         ..mod.widgets.SmallModal
 
         title := ModalTitle {
-            text: "Confirm Logout"
+            text: #(crate::i18n::tr("Confirm Logout")) i18n_text: "Confirm Logout"
         }
 
         body := ModalBody {
-            text: "Are you sure you want to logout?"
+            text: #(crate::i18n::tr("Are you sure you want to logout?")) i18n_text: "Are you sure you want to logout?"
         }
 
         buttons_view := ModalButtonsRow {
@@ -30,7 +30,7 @@ script_mod! {
                 padding: 12,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             confirm_button := RobrixNegativeIconButton {
@@ -39,7 +39,7 @@ script_mod! {
                 padding: 12,
                 draw_icon.svg: (ICON_LOGOUT)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Log out now"
+                text: #(crate::i18n::tr("Log out now")) i18n_text: "Log out now"
             }
         }
     }
@@ -170,7 +170,7 @@ impl WidgetMatchEvent for LogoutConfirmModal {
                 confirm_button.set_enabled(cx, false);
 
                 // Change cancel button to "Abort" during logout process
-                cancel_button.set_text(cx, "Abort");
+                cancel_button.set_text(cx, crate::i18n::tr("Abort"));
                 cancel_button.set_enabled(cx, true);
 
                 submit_async_request(MatrixRequest::Logout { is_desktop: effective_is_desktop(cx) });
@@ -184,7 +184,7 @@ impl WidgetMatchEvent for LogoutConfirmModal {
                     // Logout was successful
                     self.final_success = Some(true);
                     self.set_message(cx, "Logout successful!");
-                    confirm_button.set_text(cx, "Okay");
+                    confirm_button.set_text(cx, crate::i18n::tr("Okay"));
                     confirm_button.set_enabled(cx, true);
                     cancel_button.set_visible(cx, false);
 
@@ -193,10 +193,10 @@ impl WidgetMatchEvent for LogoutConfirmModal {
 
                 Some(LogoutAction::LogoutFailure(error)) => {
                     if is_logout_past_point_of_no_return() {
-                        self.label(cx, ids!(title)).set_text(cx, "Logout error, please restart Robrix.");
+                        self.label(cx, ids!(title)).set_text(cx, crate::i18n::tr("Logout error, please restart Robrix."));
                         self.set_message(cx, "The logout process encountered an error when communicating with the homeserver. Since your login session has been partially invalidated, Robrix must restart in order to continue to properly function.");
 
-                        confirm_button.set_text(cx, "Restart now");
+                        confirm_button.set_text(cx, crate::i18n::tr("Restart now"));
                         script_apply_eval!(cx, confirm_button, {
                             draw_bg +: {
                                 color: mod.widgets.COLOR_FG_DANGER_RED
@@ -207,8 +207,8 @@ impl WidgetMatchEvent for LogoutConfirmModal {
                         cancel_button.set_visible(cx, false);
 
                     } else {
-                        self.set_message(cx, &format!("Logout failed: {}", error));
-                        confirm_button.set_text(cx, "Okay");
+                        self.set_message(cx, &crate::i18n::format("Logout failed: {0}", &[("0", (error).to_string())]));
+                        confirm_button.set_text(cx, crate::i18n::tr("Okay"));
                         confirm_button.set_enabled(cx, true);
                         cancel_button.set_visible(cx, false);
                     }
@@ -218,10 +218,10 @@ impl WidgetMatchEvent for LogoutConfirmModal {
                 }
 
                 Some(LogoutAction::ApplicationRequiresRestart { .. }) => {
-                    self.label(cx, ids!(title)).set_text(cx, "Logout error, please restart Robrix.");
+                    self.label(cx, ids!(title)).set_text(cx, crate::i18n::tr("Logout error, please restart Robrix."));
                     self.set_message(cx, "Application is in an inconsistent state and needs to be restarted to continue.");
 
-                    confirm_button.set_text(cx, "Restart now");
+                    confirm_button.set_text(cx, crate::i18n::tr("Restart now"));
                     script_apply_eval!(cx, confirm_button, {
                         draw_bg +: {
                             color: mod.widgets.COLOR_FG_DANGER_RED
@@ -265,12 +265,12 @@ impl LogoutConfirmModal {
         let cancel_button = self.button(cx, ids!(cancel_button));
         let confirm_button = self.button(cx, ids!(confirm_button));
         self.final_success = None;
-        self.set_message(cx, "Are you sure you want to logout?");
+        self.set_message(cx, crate::i18n::tr("Are you sure you want to logout?"));
         confirm_button.set_enabled(cx, true);
-        confirm_button.set_text(cx, "Log out now");
+        confirm_button.set_text(cx, crate::i18n::tr("Log out now"));
         cancel_button.set_visible(cx, true);
         cancel_button.set_enabled(cx, true);
-        cancel_button.set_text(cx, "Cancel");
+        cancel_button.set_text(cx, crate::i18n::tr("Cancel"));
         cancel_button.reset_hover(cx);
         confirm_button.reset_hover(cx);
         self.redraw(cx);

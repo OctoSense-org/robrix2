@@ -1,5 +1,11 @@
 # Robrix: a Rust Matrix client built atop [Robius](https://github.com/project-robius)
 
+This OctoSense development branch preserves the current WeChat-style interface,
+English/Chinese support, Matrix Moments, web mini apps and Hagency integration.
+The native Octoscript mini-app host and Markdown/HTML editor are proposed in
+[ADR 0002](docs/adr/0002-octoscript-mini-app-authority.md). See the
+[development snapshot](docs/octosense-development.md) for validation and scope.
+
 [![Robrix Matrix Chat](https://img.shields.io/matrix/robius-robrix%3Amatrix.org?server_fqdn=matrix.org&style=flat&logo=matrix&label=Robrix%20Matrix%20Chat&color=B7410E)](https://matrix.to/#/#robius-robrix:matrix.org)
 [![Project Robius Matrix Chat](https://img.shields.io/matrix/robius-general%3Amatrix.org?server_fqdn=matrix.org&style=flat&logo=matrix&label=Project%20Robius%20Matrix%20Chat&color=B7410E)](https://matrix.to/#/#robius:matrix.org)
 

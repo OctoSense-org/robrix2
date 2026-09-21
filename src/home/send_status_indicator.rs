@@ -105,7 +105,7 @@ script_mod! {
                 text_style: theme.font_regular { font_size: 9.5 },
                 color: (COLOR_FG_DANGER_RED),
             }
-            text: "Send failed, tap to retry."
+            text: #(crate::i18n::tr("Send failed, tap to retry.")) i18n_text: "Send failed, tap to retry."
         }
 
         queued_label: Label {
@@ -118,7 +118,7 @@ script_mod! {
                 text_style: theme.font_regular { font_size: 9.5 },
                 color: (mod.widgets.SEND_STATUS_ICON_COLOR),
             }
-            text: "Will send when online."
+            text: #(crate::i18n::tr("Will send when online.")) i18n_text: "Will send when online."
         }
 
         blocked_label: Label {
@@ -131,7 +131,7 @@ script_mod! {
                 text_style: theme.font_regular { font_size: 9.5 },
                 color: (mod.widgets.SEND_STATUS_ICON_COLOR),
             }
-            text: "Waiting on an earlier message."
+            text: #(crate::i18n::tr("Waiting on an earlier message.")) i18n_text: "Waiting on an earlier message."
         }
     }
 }
@@ -436,7 +436,7 @@ impl SendStatusIndicator {
                 },
                 SendStatusLabel::Failed => label.set_text(cx, match info.icon {
                     SendStatusIcon::Retry => "Send failed, retrying...",
-                    _ if info.error.as_deref().is_none_or(is_send_error_retryable) => "Send failed, tap to retry.",
+                    _ if info.error.as_deref().is_none_or(is_send_error_retryable) => crate::i18n::tr("Send failed, tap to retry."),
                     _ => "Send failed, tap for options.",
                 }),
                 SendStatusLabel::Queued | SendStatusLabel::Blocked => { }

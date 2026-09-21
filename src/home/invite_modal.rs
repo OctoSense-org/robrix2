@@ -23,7 +23,7 @@ script_mod! {
                 text_style: REGULAR_TEXT {font_size: 11},
                 color: #000
             }
-            empty_text: "@user:example.org",
+            empty_text: #(crate::i18n::tr("@user:example.org")) i18n_empty_text: "@user:example.org",
             autocapitalize: None,
             autocorrect: Disabled,
         }
@@ -35,7 +35,7 @@ script_mod! {
                 padding: 12,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             confirm_button := RobrixPositiveIconButton {
@@ -44,7 +44,7 @@ script_mod! {
                 padding: 12,
                 draw_icon.svg: (ICON_ADD_USER)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Invite"
+                text: #(crate::i18n::tr("Invite")) i18n_text: "Invite"
             }
 
             okay_button := RobrixIconButton {
@@ -54,7 +54,7 @@ script_mod! {
                 padding: 12,
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Okay"
+                text: #(crate::i18n::tr("Okay")) i18n_text: "Okay"
             }
         }
 
@@ -159,7 +159,7 @@ impl WidgetMatchEvent for InviteModal {
             // Validate the user ID
             if user_id_str.is_empty() {
                 script_apply_eval!(cx, status_label, {
-                    text: "Please enter a user ID.",
+                    text: crate::i18n::tr("Please enter a user ID."),
                     draw_text +: {
                         color: mod.widgets.COLOR_FG_DANGER_RED,
                     },
@@ -179,7 +179,7 @@ impl WidgetMatchEvent for InviteModal {
                         });
                         self.state = InviteModalState::WaitingForInvite(user_id);
                         script_apply_eval!(cx, status_label, {
-                            text: "Sending invite...",
+                            text: crate::i18n::tr("Sending invite..."),
                             draw_text +: {
                                 color: mod.widgets.COLOR_ACTIVE_PRIMARY_DARKER,
                             },
@@ -191,7 +191,7 @@ impl WidgetMatchEvent for InviteModal {
                 }
                 Err(_) => {
                     script_apply_eval!(cx, status_label, {
-                        text: "Invalid User ID. Expected format: @user:server.xyz",
+                        text: crate::i18n::tr("Invalid User ID. Expected format: @user:server.xyz"),
                         draw_text +: {
                             color: mod.widgets.COLOR_FG_DANGER_RED,
                         },

@@ -52,8 +52,8 @@ impl Widget for Timestamp {
             _ => false,
         };
         if should_hover_in {
-            // TODO: use pure_rust_locales crate to format the time based on the chosen Locale.
-            let locale_extended_fmt_en_us= "%a %b %-d, %Y, %r";
+            // Format UI timestamps using the selected interface language.
+            let locale_extended_fmt_en_us = crate::i18n::full_date_format();
             cx.widget_action(
                 self.widget_uid(), 
                 TooltipAction::HoverIn {
@@ -69,14 +69,15 @@ impl Widget for Timestamp {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        self.set_date_time(cx, self.dt);
         self.view.draw_walk(cx, scope, walk)
     }
 }
 
 impl Timestamp {
     pub fn set_date_time(&mut self, cx: &mut Cx, dt: DateTime<Local>) {
-        // TODO: use pure_rust_locales crate to format the time based on the chosen Locale.
-        let locale_fmt_en_us = "%-I:%M %P";
+        // Format UI timestamps using the selected interface language.
+        let locale_fmt_en_us = crate::i18n::time_format();
         self.label(cx, ids!(ts_label)).set_text(
             cx,
             &dt.format(locale_fmt_en_us).to_string()

@@ -56,11 +56,11 @@ script_mod! {
         flow: Down
 
         TitleLabel {
-            text: "About Robrix"
+            text: #(crate::i18n::tr("About Robrix")) i18n_text: "About Robrix"
         }
 
         SubsectionLabel {
-            text: "Version Info"
+            text: #(crate::i18n::tr("Version Info")) i18n_text: "Version Info"
         }
 
         robrix_version_row := View {
@@ -96,7 +96,7 @@ script_mod! {
 
 
         SubsectionLabel {
-            text: "Privacy & Legal"
+            text: #(crate::i18n::tr("Privacy & Legal")) i18n_text: "Privacy & Legal"
         }
 
         privacy_policy_button := RobrixIconButton {
@@ -105,12 +105,12 @@ script_mod! {
             margin: Inset{left: 5, top: 5, bottom: 5}
             draw_icon.svg: (ICON_EXTERNAL_LINK)
             icon_walk: Walk{width: 16, height: 16}
-            text: "View Privacy Policy"
+            text: #(crate::i18n::tr("View Privacy Policy")) i18n_text: "View Privacy Policy"
         }
 
 
         SubsectionLabel {
-            text: "Project & Support"
+            text: #(crate::i18n::tr("Project & Support")) i18n_text: "Project & Support"
         }
 
         View {
@@ -126,7 +126,7 @@ script_mod! {
                 margin: Inset{left: 5, top: 5, bottom: 5}
                 draw_icon.svg: (ICON_EXTERNAL_LINK)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Robrix Homepage"
+                text: #(crate::i18n::tr("Robrix Homepage")) i18n_text: "Robrix Homepage"
             }
 
             source_button := RobrixIconButton {
@@ -135,7 +135,7 @@ script_mod! {
                 margin: Inset{left: 5, top: 5, bottom: 5}
                 draw_icon.svg: (ICON_EXTERNAL_LINK)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Source Code (GitHub)"
+                text: #(crate::i18n::tr("Source Code (GitHub)")) i18n_text: "Source Code (GitHub)"
             }
 
             issues_button := RobrixNegativeIconButton {
@@ -144,13 +144,13 @@ script_mod! {
                 margin: Inset{left: 5, top: 5, bottom: 5}
                 draw_icon.svg: (ICON_EXTERNAL_LINK)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Report an Issue"
+                text: #(crate::i18n::tr("Report an Issue")) i18n_text: "Report an Issue"
             }
         }
 
 
         SubsectionLabel {
-            text: "Troubleshooting"
+            text: #(crate::i18n::tr("Troubleshooting")) i18n_text: "Troubleshooting"
         }
 
         View {
@@ -166,7 +166,7 @@ script_mod! {
                 margin: Inset{left: 5, top: 5, bottom: 5}
                 draw_icon.svg: (ICON_TRASH)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Clear Cache and Reload"
+                text: #(crate::i18n::tr("Clear Cache and Reload")) i18n_text: "Clear Cache and Reload"
             }
         }
 
@@ -279,7 +279,7 @@ impl AboutSettings {
             .set_text(cx, &sdk_html());
 
         view.html(cx, ids!(troubleshooting_description))
-            .set_text(cx, TROUBLESHOOTING_DESCRIPTION);
+            .set_text(cx, crate::i18n::tr(TROUBLESHOOTING_DESCRIPTION));
 
         // Only show the TestFlight row if testflight env var is set.
         let has_testflight = !TESTFLIGHT_BUILD_NUMBER.is_empty();

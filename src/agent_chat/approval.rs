@@ -156,7 +156,7 @@ impl ApprovalRequest {
     /// and any reusable scope the wider approvals would grant.
     pub fn summary(&self) -> String {
         let mut parts: Vec<String> = Vec::with_capacity(4);
-        parts.push(format!("Agent {} · project {}", self.agent, self.project));
+        parts.push(crate::i18n::format("Agent {agent} · project {project}", &[("agent", self.agent.clone()), ("project", self.project.clone())]));
         if !self.description.is_empty() {
             parts.push(self.description.clone());
         }
@@ -164,10 +164,10 @@ impl ApprovalRequest {
             parts.push(self.input_preview.clone());
         }
         if let Some(scope) = &self.reusable_scope {
-            let mut line = String::from("Reusable scope: ");
+            let mut line = String::from(crate::i18n::tr("Reusable scope: "));
             line.push_str(&scope.description);
             if !scope.workspace.is_empty() {
-                line.push_str(&format!("\nWorkspace: {}", scope.workspace));
+                line.push_str(&crate::i18n::format("\nWorkspace: {workspace}", &[("workspace", scope.workspace.clone())]));
             }
             parts.push(line);
         }

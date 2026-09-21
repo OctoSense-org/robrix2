@@ -1,5 +1,6 @@
 
 use makepad_widgets::*;
+use super::mobile_settings::MobileSettingsWidgetExt;
 
 use crate::{app::AppState, home::navigation_tab_bar::{NavigationBarAction, SelectedTab, get_own_profile}, profile::user_profile::UserProfile, settings::{PopulateMode, account_settings::AccountSettingsWidgetExt, app_settings::AppSettingsWidgetExt, privacy_settings::PrivacySettingsWidgetExt}};
 
@@ -68,7 +69,7 @@ script_mod! {
         width: Fill, height: Fill,
         flow: Overlay
 
-        SolidView {
+        main_content := SolidView {
             show_bg: true
             draw_bg.color: (mod.widgets.RBX_BG_CANVAS)
             padding: Inset{top: (mod.widgets.SPACE_SM), left: (mod.widgets.SETTINGS_CONTENT_PADDING), right: (mod.widgets.SETTINGS_CONTENT_PADDING) },
@@ -86,7 +87,7 @@ script_mod! {
                     width: Fill
                     padding: 0,
                     margin: 0,
-                    text: "Settings"
+                    text: #(crate::i18n::tr("Settings")) i18n_text: "Settings"
                     draw_text +: {
                         text_style: (mod.widgets.RBX_TEXT_PAGE_TITLE),
                         color: (mod.widgets.RBX_FG_PRIMARY)
@@ -115,7 +116,7 @@ script_mod! {
                 }
             }
 
-            LineH { padding: 0, margin: Inset{top: (mod.widgets.SPACE_SM), bottom: (mod.widgets.SPACE_SM)} }
+            header_divider := LineH { padding: 0, margin: Inset{top: (mod.widgets.SPACE_SM), bottom: (mod.widgets.SPACE_SM)} }
 
             // Category tabs. robrix2 also has Devices and Labs; upstream has no
             // content for either, so they are not offered here.
@@ -126,13 +127,15 @@ script_mod! {
                 spacing: (mod.widgets.SPACE_SM)
                 margin: Inset{left: (mod.widgets.SPACE_XS), right: (mod.widgets.SPACE_XS), bottom: (mod.widgets.SPACE_SM)}
 
-                category_account_button := mod.widgets.SettingsCategoryTab { text: "Account" }
-                category_preferences_button := mod.widgets.SettingsCategoryTab { text: "Preferences" }
-                category_privacy_button := mod.widgets.SettingsCategoryTab { text: "Privacy" }
-                category_about_button := mod.widgets.SettingsCategoryTab { text: "About" }
+                category_account_button := mod.widgets.SettingsCategoryTab { text: #(crate::i18n::tr("Account")) i18n_text: "Account" }
+                category_preferences_button := mod.widgets.SettingsCategoryTab { text: #(crate::i18n::tr("Preferences")) i18n_text: "Preferences" }
+                category_privacy_button := mod.widgets.SettingsCategoryTab { text: #(crate::i18n::tr("Privacy")) i18n_text: "Privacy" }
+                category_about_button := mod.widgets.SettingsCategoryTab { text: #(crate::i18n::tr("About")) i18n_text: "About" }
             }
 
-            settings_sections := PageFlip {
+            settings_sections_wrapper := View {
+                width: Fill height: Fill
+                settings_sections := PageFlip {
                 width: Fill, height: Fill
                 active_page: @account_settings_page
 
@@ -165,8 +168,11 @@ script_mod! {
                     about_settings := AboutSettings {}
                     View { width: Fill, height: 20 }
                 }
+                }
             }
         }
+
+        mobile_settings := MobileSettings {visible: false}
 
         // We want all modals to appear in front of the settings screen.
         create_wallet_modal := Modal {
@@ -194,10 +200,15 @@ enum SettingsCategory {
 pub struct SettingsScreen {
     #[deref] view: View,
     #[rust] selected_category: SettingsCategory,
+    #[rust] was_mobile: Option<bool>,
 }
 
 impl Widget for SettingsScreen {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        if !crate::home::home_screen::effective_is_desktop(cx) {
+            self.view.mobile_settings(cx, ids!(mobile_settings)).handle_event(cx, event, scope);
+            return;
+        }
         self.view.handle_event(cx, event, scope);
 
         // ScriptReapply preserves text fields (String / ArcStringMut bail out),
@@ -289,6 +300,18 @@ impl Widget for SettingsScreen {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let mobile = !crate::home::home_screen::effective_is_desktop(cx);
+        if self.was_mobile != Some(mobile) {
+            if !mobile {
+                if let Some(app_state) = scope.data.get::<AppState>() {
+                    let profile = get_own_profile(cx);
+                    self.populate_subwidgets(cx, PopulateMode::Initial, profile, app_state);
+                }
+            }
+            self.was_mobile = Some(mobile);
+        }
+        self.view.view(cx, ids!(main_content)).set_visible(cx, !mobile);
+        self.view.widget(cx, ids!(mobile_settings)).set_visible(cx, mobile);
         self.view.draw_walk(cx, scope, walk)
     }
 }
@@ -300,7 +323,10 @@ impl SettingsScreen {
             error!("Failed to get own profile for settings screen.");
             return;
         };
-        self.populate_subwidgets(cx, PopulateMode::Initial, Some(profile), app_state);
+        self.view.mobile_settings(cx, ids!(mobile_settings)).populate(cx, Some(profile.clone()));
+        if crate::home::home_screen::effective_is_desktop(cx) {
+            self.populate_subwidgets(cx, PopulateMode::Initial, Some(profile), app_state);
+        }
         self.view.button(cx, ids!(close_button)).reset_hover(cx);
         self.sync_selected_category(cx);
         cx.set_key_focus(self.view.area());
@@ -368,6 +394,12 @@ impl SettingsScreen {
 }
 
 impl SettingsScreenRef {
+    pub fn open_personal_info(&self, cx: &mut Cx) {
+        if let Some(inner) = self.borrow() {
+            inner.view.mobile_settings(cx, ids!(mobile_settings)).open_personal_info(cx);
+        }
+    }
+
     /// See [`SettingsScreen::populate()`].
     pub fn populate(&self, cx: &mut Cx, own_profile: Option<UserProfile>, app_state: &AppState) {
         let Some(mut inner) = self.borrow_mut() else { return; };

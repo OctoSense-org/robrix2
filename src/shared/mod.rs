@@ -1,6 +1,7 @@
 use makepad_widgets::ScriptVm;
 
 pub mod attachment_download;
+pub mod cached_widget;
 pub mod avatar;
 pub mod collapsible_header;
 pub mod context_menu;
@@ -29,10 +30,12 @@ pub mod verification_badge;
 pub mod restore_status_view;
 pub mod design_tokens;
 pub mod image_viewer;
+pub mod mobile_details;
 
 
 pub fn script_mod(vm: &mut ScriptVm) {
     // Order matters here, as some widget definitions depend on others.
+    cached_widget::script_mod(vm);
     styles::script_mod(vm);
     design_tokens::script_mod(vm);
     helpers::script_mod(vm);
@@ -46,6 +49,7 @@ pub fn script_mod(vm: &mut ScriptVm) {
     room_filter_input_bar::script_mod(vm);
     room_input_popup_menu::script_mod(vm);
     avatar::script_mod(vm);
+    mobile_details::script_mod(vm);
     text_or_image::script_mod(vm);
     html_or_plaintext::script_mod(vm);
     bouncing_dots::script_mod(vm);

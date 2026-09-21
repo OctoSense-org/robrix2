@@ -32,8 +32,8 @@ script_mod! {
         }
         icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -1, right: -2} }
 
-        // text: "Search Messages"
-        text: "Search (TODO)"
+        // text: #(crate::i18n::tr("Search Messages")) i18n_text: "Search Messages"
+        text: #(crate::i18n::tr("Search (TODO)")) i18n_text: "Search (TODO)"
         draw_text +: {
             color: (COLOR_FG_DISABLED)
             // color: (COLOR_PRIMARY),
@@ -46,6 +46,7 @@ script_mod! {
 
 #[derive(Script, ScriptHook, Widget)]
 pub struct SearchMessagesButton {
+    #[live] i18n_text: String,
     #[deref] button: Button,
 }
 

@@ -9,7 +9,7 @@ script_mod! {
     mod.widgets.LoginStatusModal = set_type_default() do #(LoginStatusModal::register_widget(vm)) {
         ..mod.widgets.SmallModal
 
-        title := ModalTitle { text: "Login Status" }
+        title := ModalTitle { text: #(crate::i18n::tr("Login Status")) i18n_text: "Login Status" }
 
         body := ModalBody {
             align: Align{x: 0.5}
@@ -21,7 +21,7 @@ script_mod! {
                 align: Align{x: 0.5, y: 0.5}
                 width: Fit, height: Fit
                 padding: 12
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
         }
     }

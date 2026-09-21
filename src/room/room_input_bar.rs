@@ -227,7 +227,7 @@ script_mod! {
                         margin: Inset{ top: 2, bottom: 2, left: 2, right: 4 },
 
                         text_input := RobrixTextInput {
-                            empty_text: "Write a message (in Markdown)…"
+                            empty_text: #(crate::i18n::tr("Write a message (in Markdown)…")) i18n_empty_text: "Write a message (in Markdown)…"
                             is_multiline: true,
                             // Reserve the microphone's gutter so it never overlaps the draft.
                             padding: Inset{top: 10, bottom: 10, left: 8, right: 48}
@@ -347,7 +347,7 @@ script_mod! {
                         color: (COLOR_TEXT)
                         text_style: theme.font_italic {font_size: 12.2}
                     }
-                    text: "You don't have permission to post to this room.",
+                    text: #(crate::i18n::tr("You don't have permission to post to this room.")) i18n_text: "You don't have permission to post to this room.",
                 }
             }
 
@@ -356,6 +356,51 @@ script_mod! {
             editing_pane := EditingPane { }
         }
     }
+    mod.widgets.MobileRoomInputBar = mod.widgets.RoomInputBar {
+        mobile: true
+        replying_preview := mod.widgets.MobileReplyingPreview {}
+        padding: Inset{left: 8 right: 8 top: 6 bottom: 8}
+        draw_bg.color: #xf7f7f7
+        overlay_wrapper +: {
+            input_bar +: {
+                padding: 0 spacing: 0
+                draw_bg +: {color: #xf7f7f7 border_size: 0 border_radius: 0}
+                button_row.visible: false
+                message_row +: {
+                    align: Align{y: 0.5} spacing: 5
+                    mentionable_text_input +: {
+                        margin: 0
+                        text_input +: {
+                            empty_text: #(crate::i18n::tr("Message")) i18n_empty_text: "Message"
+                            padding: Inset{left: 10 right: 35 top: 10 bottom: 10}
+                            draw_text +: {color: #x191919 text_style: theme.font_regular {font_size: 12.5}}
+                            draw_bg +: {
+                                color: #xffffff color_hover: #xffffff color_focus: #xffffff
+                                color_empty: #xffffff border_radius: 5
+                            }
+                        }
+                    }
+                    send_message_button +: {
+                        visible: false width: 54 height: 36 margin: 0
+                        text: #(crate::i18n::tr("Send")) i18n_text: "Send" icon_walk: Walk{width: 0 height: 0}
+                        draw_text +: {color: #xffffff text_style: theme.font_regular {font_size: 11}}
+                    }
+                    mobile_emoji_button := mod.widgets.ComposerToolButton {
+                        width: 32 height: 36 padding: 4 margin: 0
+                        draw_icon +: {svg: ICON_ADD_REACTION color: #x191919}
+                        icon_walk: Walk{width: 26 height: 26}
+                    }
+                    mobile_more_button := mod.widgets.ComposerToolButton {
+                        width: 32 height: 36 padding: 4 margin: 0
+                        align: Align{x: 0.5 y: 0.5}
+                        draw_icon +: {svg: ICON_ADD color: #x191919}
+                        icon_walk: Walk{width: 22 height: 22}
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 /// Which view the `RoomInputBar` should show, based on room state.
@@ -377,6 +422,7 @@ enum RoomInputBarMode<'a> {
 /// or a notice that the user cannot send messages to this room.
 #[derive(Script, Widget)]
 pub struct RoomInputBar {
+    #[live] mobile: bool,
     #[source] source: ScriptObjectRef,
     #[deref] view: View,
 
@@ -763,8 +809,10 @@ impl RoomInputBar {
         };
 
         let open_popup_menu_button = self.button(cx, ids!(open_popup_menu_button));
-        if open_popup_menu_button.clicked(actions) {
-            let button_rect = open_popup_menu_button.area().rect(cx);
+        if open_popup_menu_button.clicked(actions) || self.button(cx, ids!(mobile_more_button)).clicked(actions) {
+            let button_rect = if self.mobile {
+                self.button(cx, ids!(mobile_more_button)).area().rect(cx)
+            } else { open_popup_menu_button.area().rect(cx) };
             cx.widget_action(
                 room_screen_widget_uid,
                 RoomInputPopupMenuAction::Show { button_rect },
@@ -790,7 +838,8 @@ impl RoomInputBar {
                 mentionable_text_input.insert_at_cursor(cx, "/");
             }
         }
-        if self.button(cx, ids!(emoji_picker_button)).clicked(actions) {
+        if self.button(cx, ids!(emoji_picker_button)).clicked(actions)
+            || self.button(cx, ids!(mobile_emoji_button)).clicked(actions) {
             self.is_emoji_picker_expanded = !self.is_emoji_picker_expanded;
             self.view.view(cx, ids!(emoji_picker_popup)).set_visible(cx, self.is_emoji_picker_expanded);
             self.redraw(cx);
@@ -1243,10 +1292,14 @@ impl RoomInputBar {
         // for encrypted and unencrypted rooms alike (the lock badge on the icon
         // carries the encryption state); greyed out otherwise.
         let (fg_color, bg_color) = if enable {
-            (RBX_FG_ON_ACCENT, RBX_ACCENT)
+            (RBX_FG_ON_ACCENT, if self.mobile { vec4(0.027, 0.757, 0.376, 1.0) } else { RBX_ACCENT })
         } else {
             (RBX_FG_DISABLED, RBX_BG_DISABLED)
         };
+        if self.mobile {
+            send_message_button.set_visible(cx, enable);
+            self.view.button(cx, ids!(mobile_more_button)).set_visible(cx, !enable);
+        }
         script_apply_eval!(cx, send_message_button, {
             enabled: #(enable),
             draw_icon.color: #(fg_color),
@@ -1267,16 +1320,18 @@ impl RoomInputBar {
             script_apply_eval!(cx, send_message_button, {
                 draw_icon.svg: mod.widgets.ICON_SEND_ENCRYPTED,
             });
-            empty_text = "Write an encrypted message (in Markdown)…";
+            empty_text = crate::i18n::tr("Write an encrypted message (in Markdown)…");
         } else {
             script_apply_eval!(cx, send_message_button, {
                 draw_icon.svg: mod.widgets.ICON_SEND_UNENCRYPTED,
             });
-            empty_text = "Write a message (in Markdown)…";
+            empty_text = crate::i18n::tr("Write a message (in Markdown)…");
         }
 
         self.text_input(cx, ids!(input_bar.mentionable_text_input.text_input))
-            .set_empty_text(cx, empty_text.to_string());
+            .set_empty_text(cx, if self.mobile {
+                if is_encrypted { crate::i18n::tr("Message") } else { crate::i18n::tr("Message (unencrypted)") }
+            } else { empty_text }.to_string());
 
         let enable = self.is_send_enabled;
         self.enable_send_message_button(cx, enable);

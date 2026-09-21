@@ -23,7 +23,7 @@ pub fn open_url(url: &str) {
     if let Err(e) = robius_open::Uri::new(url).open() {
         error!("Failed to open URL {:?}. Error: {:?}", url, e);
         enqueue_popup_notification(
-            format!("Could not open URL: {url}"),
+            crate::i18n::format("Could not open URL: {url}", &[("url", (url).to_string())]),
             PopupKind::Error,
             Some(6.0),
         );
@@ -240,7 +240,7 @@ fn display_file_type_label(mime_type: &str) -> &'static str {
         _ if mime_type.starts_with("audio/") => "Audio file",
         _ if mime_type.starts_with("video/") => "Video file",
         _ if mime_type.starts_with("font/") => "Font file",
-        _ => "File",
+        _ => crate::i18n::tr("File"),
     }
 }
 
@@ -617,25 +617,25 @@ pub fn relative_format(millis: MilliSecondsSinceUnixEpoch) -> Option<Cow<'static
 
     // Handle different time ranges and format accordingly
     if duration < Duration::seconds(60) {
-        Some("Just now".into())
+        Some(crate::i18n::tr("Just now").into())
     } else if duration < Duration::minutes(60) {
         let mins = duration.num_minutes();
         if mins == 1 {
-            Some("1 min ago".into())
+            Some(crate::i18n::tr("1 min ago").into())
         } else {
-            Some(format!("{mins} mins ago").into())
+            Some(crate::i18n::format("{mins} mins ago", &[("mins", (mins).to_string())]).into())
         }
     } else if duration < Duration::hours(24) && now.date_naive() == datetime.date_naive() {
         Some(datetime.format("%H:%M").to_string().into()) // "HH:MM" format for today
     } else if duration < Duration::hours(48) {
-        if let Some(yesterday) = now.date_naive().succ_opt() {
+        if let Some(yesterday) = now.date_naive().pred_opt() {
             if yesterday == datetime.date_naive() {
-                return Some(format!("Yesterday at {}", datetime.format("%H:%M")).into());
+                return Some(crate::i18n::format("Yesterday at {0}", &[("0", (datetime.format("%H:%M")).to_string())]).into());
             }
         }
-        Some(datetime.format("%A").to_string().into()) // Fallback to day of the week if not yesterday
+        Some(crate::i18n::tr(&datetime.format("%A").to_string()).to_owned().into()) // Fallback to day of the week if not yesterday
     } else if duration < Duration::weeks(1) {
-        Some(datetime.format("%A").to_string().into()) // Day of the week (e.g., "Tuesday")
+        Some(crate::i18n::tr(&datetime.format("%A").to_string()).to_owned().into()) // Day of the week (e.g., "Tuesday")
     } else {
         Some(datetime.format("%F").to_string().into()) // "YYYY-MM-DD" format for older messages
     }
@@ -660,14 +660,14 @@ pub fn time_ago(millis: MilliSecondsSinceUnixEpoch) -> Option<Cow<'static, str>>
     } else if duration < Duration::hours(24) {
         let hours = duration.num_hours();
         if hours == 1 {
-            Some("1 hour ago".into())
+            Some(crate::i18n::tr("1 hour ago").into())
         } else {
-            Some(format!("{hours} hours ago").into())
+            Some(crate::i18n::format("{hours} hours ago", &[("hours", (hours).to_string())]).into())
         }
     } else if duration < Duration::hours(48) {
-        Some("yesterday".into())
+        Some(crate::i18n::tr("yesterday").into())
     } else {
-        Some(format!("{} days ago", duration.num_days()).into())
+        Some(crate::i18n::format("{0} days ago", &[("0", (duration.num_days()).to_string())]).into())
     }
 }
 

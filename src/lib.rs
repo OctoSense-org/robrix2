@@ -59,6 +59,12 @@ mod join_leave_room_modal;
 pub mod block_user_modal;
 /// Shared UI components.
 pub mod shared;
+pub mod mini_app;
+pub mod forwarding;
+pub mod moments;
+pub mod i18n;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod apple_fonts;
 /// Generating text previews of timeline events/messages.
 mod event_preview;
 pub mod room;
@@ -106,9 +112,26 @@ pub fn project_dir() -> &'static ProjectDirs {
 }
 
 pub fn app_data_dir() -> &'static Path {
-    project_dir().data_dir()
+    static DATA_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+    DATA_DIR.get_or_init(|| {
+        match std::env::var_os("ROBRIX_DATA_DIR") {
+            Some(value) => {
+                let path = std::path::PathBuf::from(value);
+                assert!(path.is_absolute(), "ROBRIX_DATA_DIR must be an absolute path");
+                path
+            }
+            None => project_dir().data_dir().to_owned(),
+        }
+    })
 }
 
 pub fn cache_dir() -> &'static Path {
-    project_dir().cache_dir()
+    static CACHE_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+    CACHE_DIR.get_or_init(|| {
+        if std::env::var_os("ROBRIX_DATA_DIR").is_some() {
+            app_data_dir().join("cache")
+        } else {
+            project_dir().cache_dir().to_owned()
+        }
+    })
 }

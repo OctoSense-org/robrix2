@@ -30,7 +30,7 @@ script_mod! {
             title := Label {
                 padding: 0
                 margin: 0
-                text: "Welcome to Robrix!",
+                text: #(crate::i18n::tr("Welcome to Robrix!")) i18n_text: "Welcome to Robrix!",
                 draw_text +: {
                     color: (mod.widgets.WELCOME_TEXT_COLOR),
                     text_style: theme.font_bold {

@@ -17,7 +17,7 @@ script_mod! {
         flow: Down
 
         TitleLabel {
-            text: "Account Settings"
+            text: #(crate::i18n::tr("Account Settings")) i18n_text: "Account Settings"
         }
 
         // Verification banners. Both stay hidden until we know the state.
@@ -43,7 +43,7 @@ script_mod! {
                     color: (COLOR_FG_ACCEPT_GREEN),
                     text_style: theme.font_bold { font_size: 11.5 },
                 }
-                text: "This device is verified and can access encrypted messages."
+                text: #(crate::i18n::tr("This device is verified and can access encrypted messages.")) i18n_text: "This device is verified and can access encrypted messages."
             }
         }
 
@@ -70,7 +70,7 @@ script_mod! {
                     color: (COLOR_FG_DANGER_RED),
                     text_style: theme.font_bold { font_size: 11.5 },
                 }
-                text: "This device is not verified and can't view encrypted messages."
+                text: #(crate::i18n::tr("This device is not verified and can't view encrypted messages.")) i18n_text: "This device is not verified and can't view encrypted messages."
             }
 
             verify_device_button := RobrixIconButton {
@@ -80,7 +80,7 @@ script_mod! {
                 margin: Inset{top: 10, left: 5, bottom: 4}
                 draw_icon.svg: (VERIFICATION_YES)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Verify this Device"
+                text: #(crate::i18n::tr("Verify this Device")) i18n_text: "Verify this Device"
             }
 
             Label {
@@ -91,7 +91,7 @@ script_mod! {
                     color: (MESSAGE_TEXT_COLOR),
                     text_style: theme.font_regular { font_size: 11.5 },
                 }
-                text: "Or verify it from another client using this info:"
+                text: #(crate::i18n::tr("Or verify it from another client using this info:")) i18n_text: "Or verify it from another client using this info:"
             }
 
             // Filled in from Rust with the session name + device ID.
@@ -108,7 +108,7 @@ script_mod! {
         }
 
         SubsectionLabel {
-            text: "Your Avatar:"
+            text: #(crate::i18n::tr("Your Avatar:")) i18n_text: "Your Avatar:"
         }
 
         View {
@@ -150,7 +150,7 @@ script_mod! {
                         margin: 0,
                         draw_icon.svg: (ICON_UPLOAD)
                         icon_walk: Walk{width: 16, height: 16}
-                        text: "Upload Avatar"
+                        text: #(crate::i18n::tr("Upload Avatar")) i18n_text: "Upload Avatar"
                     }
 
                     upload_avatar_spinner := LoadingSpinner {
@@ -173,7 +173,7 @@ script_mod! {
                         margin: 0,
                         draw_icon.svg: (ICON_TRASH)
                         icon_walk: Walk{ width: 16, height: 16 }
-                        text: "Delete Avatar"
+                        text: #(crate::i18n::tr("Delete Avatar")) i18n_text: "Delete Avatar"
                     }
 
                     delete_avatar_spinner := LoadingSpinner {
@@ -186,14 +186,14 @@ script_mod! {
         }
 
         SubsectionLabel {
-            text: "Your Display Name"
+            text: #(crate::i18n::tr("Your Display Name")) i18n_text: "Your Display Name"
         }
 
         display_name_input := RobrixTextInput {
             margin: Inset{top: 3, left: 5, right: 5, bottom: 8},
             width: Fill { max: 226}, // to match the button width
             height: Fit
-            empty_text: "Add a display name..."
+            empty_text: #(crate::i18n::tr("Add a display name...")) i18n_empty_text: "Add a display name..."
         }
 
         View {
@@ -215,7 +215,7 @@ script_mod! {
                 margin: Inset{left: 5},
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: 0}
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             accept_display_name_button := RobrixPositiveIconButton {
@@ -226,7 +226,7 @@ script_mod! {
                 margin: Inset{left: 5},
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: 0}
-                text: "Save Name"
+                text: #(crate::i18n::tr("Save Name")) i18n_text: "Save Name"
             }
 
             save_name_spinner := LoadingSpinner {
@@ -238,7 +238,7 @@ script_mod! {
         }
 
         SubsectionLabel {
-            text: "Your User ID"
+            text: #(crate::i18n::tr("Your User ID")) i18n_text: "Your User ID"
         }
 
         View {
@@ -263,12 +263,12 @@ script_mod! {
                     color: (MESSAGE_TEXT_COLOR),
                     text_style: MESSAGE_TEXT_STYLE { font_size: 11.5 },
                 }
-                text: "You are not logged in."
+                text: #(crate::i18n::tr("You are not logged in.")) i18n_text: "You are not logged in."
             }
         }
 
         SubsectionLabel {
-            text: "Other Actions"
+            text: #(crate::i18n::tr("Other Actions")) i18n_text: "Other Actions"
         }
 
         View {
@@ -285,7 +285,7 @@ script_mod! {
                 margin: Inset{left: 5}
                 draw_icon.svg: (ICON_EXTERNAL_LINK)
                 icon_walk: Walk{width: 16, height: 16}
-                text: "Manage Account"
+                text: #(crate::i18n::tr("Manage Account")) i18n_text: "Manage Account"
             }
 
             logout_button := RobrixNegativeIconButton {
@@ -294,7 +294,7 @@ script_mod! {
                 margin: Inset{left: 5}
                 draw_icon.svg: (ICON_LOGOUT)
                 icon_walk: Walk{ width: 16, height: 16, margin: Inset{right: -2} }
-                text: "Log out"
+                text: #(crate::i18n::tr("Log out")) i18n_text: "Log out"
             }
         }
     }
@@ -371,7 +371,7 @@ impl Widget for AccountSettings {
                 cx.widget_action(
                     copy_user_id_button.widget_uid(), 
                     TooltipAction::HoverIn {
-                        text: "Copy User ID".to_string(),
+                        text: crate::i18n::tr("Copy User ID").to_string(),
                         widget_rect: copy_user_id_button_area.rect(cx),
                         options: CalloutTooltipOptions {
                             position: TooltipPosition::Top,
@@ -445,7 +445,7 @@ impl MatchEvent for AccountSettings {
             // Handle LogoutAction::InProgress to update button state
             if let Some(LogoutAction::InProgress(is_in_progress)) = action.downcast_ref() {
                 let logout_button = self.view.button(cx, ids!(logout_button));
-                logout_button.set_text(cx, if *is_in_progress { "Logging out..." } else { "Log out" });
+                logout_button.set_text(cx, if *is_in_progress { "Logging out..." } else { crate::i18n::tr("Log out") });
                 logout_button.set_enabled(cx, !*is_in_progress);
                 logout_button.reset_hover(cx);
                 continue;
@@ -464,7 +464,7 @@ impl MatchEvent for AccountSettings {
                         profile.avatar_state.update_from_cache(cx);
                         self.populate_avatar_views(cx);
                         enqueue_popup_notification(
-                            format!("Successfully {} avatar.", if new_avatar_url.is_some() { "updated" } else { "deleted" }),
+                            crate::i18n::format("Successfully {0} avatar.", &[("0", (if new_avatar_url.is_some() { "updated" } else { "deleted" }).to_string())]),
                             PopupKind::Success,
                             Some(4.0),
                         );
@@ -562,33 +562,13 @@ impl MatchEvent for AccountSettings {
         if upload_avatar_button.clicked(actions) {
             // Don't disable the buttons yet; wait for the user to confirm the
             // picked image in the upload modal, which then posts the `AvatarUploadStarted` action.
-            handle_picker_launch_errors(
-                robius_file_picker::FileDialog::new()
-                    .add_filter("Images", utils::AVATAR_IMAGE_EXTENSIONS)
-                    .set_media_representation(robius_file_picker::MediaRepresentation::Compatible)
-                    .pick_image(|result| handle_picked_file(result, validate_avatar_image))
-            );
+            pick_profile_photo();
         }
 
         if delete_avatar_button.clicked(actions) {
             // Don't immediately disable the buttons. Instead, wait for the user to confirm
             // in the confirmation modal, and then disable the buttons upon handling `AvatarDeleteStarted`.
-            let content = ConfirmationModalContent {
-                title_text: "Delete Avatar".into(),
-                body_text: "Are you sure you want to delete your avatar?".into(),
-                accept_button_text: Some("Delete".into()),
-                on_accept_clicked: Some(Box::new(|cx| {
-                    submit_async_request(MatrixRequest::SetAvatar { avatar_url: None });
-                    cx.action(AccountSettingsAction::AvatarDeleteStarted);
-                    enqueue_popup_notification(
-                        "Deleting your avatar...",
-                        PopupKind::Info,
-                        Some(5.0),
-                    );
-                })),
-                ..Default::default()
-            };
-            cx.action(ConfirmDeleteAction::Show(RefCell::new(Some(content))));
+            confirm_remove_profile_photo(cx);
         }
 
         // Enable the name change buttons if the user modified the display name to be different.
@@ -807,8 +787,8 @@ impl AccountSettings {
         // already right if it shows up later.
         let info_text = match self.own_device.as_ref() {
             Some(device) => match device.display_name() {
-                Some(name) => format!("Session: \"{name}\",  Device ID: {}", device.device_id()),
-                None       => format!("Device ID: {}", device.device_id()),
+                Some(name) => crate::i18n::format("Session: \"{name}\",  Device ID: {0}", &[("name", (name).to_string()), ("0", (device.device_id()).to_string())]),
+                None       => crate::i18n::format("Device ID: {0}", &[("0", (device.device_id()).to_string())]),
             },
             None => String::new(),
         };
@@ -943,7 +923,7 @@ fn validate_avatar_image(file_data: FileUploadMetadata) -> Result<PendingUpload,
         ));
     }
     if file_data.size == 0 {
-        return Err(format!("\"{name}\" is empty (0 bytes). Please choose a different image."));
+        return Err(crate::i18n::format("\"{name}\" is empty (0 bytes). Please choose a different image.", &[("name", (name).to_string())]));
     }
     Ok(PendingUpload::Avatar(file_data))
 }
@@ -955,4 +935,29 @@ pub enum AccountSettingsAction {
     AvatarDeleteStarted,
     /// The avatar upload operation was started (e.g., confirmed in a modal).
     AvatarUploadStarted,
+}
+
+/// Use the same picker, validation, and upload confirmation on both layouts.
+pub(crate) fn pick_profile_photo() {
+    handle_picker_launch_errors(
+        robius_file_picker::FileDialog::new()
+            .add_filter("Images", utils::AVATAR_IMAGE_EXTENSIONS)
+            .set_media_representation(robius_file_picker::MediaRepresentation::Compatible)
+            .pick_image(|result| handle_picked_file(result, validate_avatar_image))
+    );
+}
+
+pub(crate) fn confirm_remove_profile_photo(cx: &mut Cx) {
+    let content = ConfirmationModalContent {
+        title_text: crate::i18n::tr("Delete Avatar").into(),
+        body_text: crate::i18n::tr("Are you sure you want to delete your avatar?").into(),
+        accept_button_text: Some(crate::i18n::tr("Delete").into()),
+        on_accept_clicked: Some(Box::new(|cx| {
+            submit_async_request(MatrixRequest::SetAvatar { avatar_url: None });
+            cx.action(AccountSettingsAction::AvatarDeleteStarted);
+            enqueue_popup_notification("Deleting your avatar...", PopupKind::Info, Some(5.0));
+        })),
+        ..Default::default()
+    };
+    cx.action(ConfirmDeleteAction::Show(RefCell::new(Some(content))));
 }

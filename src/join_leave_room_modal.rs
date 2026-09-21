@@ -29,7 +29,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             accept_button := RobrixPositiveIconButton {
@@ -38,7 +38,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Yes"
+                text: #(crate::i18n::tr("Yes")) i18n_text: "Yes"
             }
         }
 
@@ -60,7 +60,7 @@ script_mod! {
                     },
                     color: #A,
                 }
-                text: "Tip: hold Shift when clicking a button to bypass this prompt."
+                text: #(crate::i18n::tr("Tip: hold Shift when clicking a button to bypass this prompt.")) i18n_text: "Tip: hold Shift when clicking a button to bypass this prompt."
             }
         }
     }
@@ -280,7 +280,7 @@ impl WidgetMatchEvent for JoinLeaveRoomModal {
                 accept_button.set_text(cx, accept_button_text);
                 accept_button.set_enabled(cx, false);
                 // The request is already on its way, so "Cancel" would be a lie.
-                cancel_button.set_text(cx, "Close");
+                cancel_button.set_text(cx, crate::i18n::tr("Close"));
                 needs_redraw = true;
             }
         }
@@ -357,7 +357,7 @@ impl WidgetMatchEvent for JoinLeaveRoomModal {
                         }
                         Err(e) => {
                             title = "Error leaving space!";
-                            description = format!("Failed to leave space \"{space_name_id}\".\n\nError: {e}");
+                            description = crate::i18n::format("Failed to leave space \"{space_name_id}\".\n\nError: {e}", &[("space_name_id", (space_name_id).to_string()), ("e", (e).to_string())]);
                             new_final_success = Some(false);
                         }
                     }
@@ -371,7 +371,7 @@ impl WidgetMatchEvent for JoinLeaveRoomModal {
             self.final_success = Some(success);
             needs_redraw = true;
             accept_button.set_enabled(cx, true);
-            accept_button.set_text(cx, "Okay");
+            accept_button.set_text(cx, crate::i18n::tr("Okay"));
             apply_primary_button_style(cx, &mut accept_button);
             accept_button.reset_hover(cx);
             cancel_button.set_visible(cx, false);
@@ -408,7 +408,7 @@ impl JoinLeaveRoomModal {
                     "Are you sure you want to accept this invite to join \"{}\"?",
                     invite.room_name_id(),
                 );
-                tip_button = "Join";
+                tip_button = crate::i18n::tr("Join");
             }
             JoinLeaveModalKind::RejectInvite(invite) => {
                 title = "Reject this invite?";
@@ -430,7 +430,7 @@ impl JoinLeaveRoomModal {
                     "Are you sure you want to join \"{}\"?",
                     details.room_name_id()
                 );
-                tip_button = "Join";
+                tip_button = crate::i18n::tr("Join");
             }
             JoinLeaveModalKind::LeaveRoom(room) => {
                 title = "Leave this room?";
@@ -468,7 +468,7 @@ impl JoinLeaveRoomModal {
 
         let mut accept_button = self.button(cx, ids!(accept_button));
         let mut cancel_button = self.button(cx, ids!(cancel_button));
-        accept_button.set_text(cx, "Yes");
+        accept_button.set_text(cx, crate::i18n::tr("Yes"));
 
         let is_negative = matches!(kind,
             JoinLeaveModalKind::RejectInvite(_)
@@ -489,7 +489,7 @@ impl JoinLeaveRoomModal {
         accept_button.set_enabled(cx, true);
         accept_button.set_visible(cx, true);
         accept_button.reset_hover(cx);
-        cancel_button.set_text(cx, "Cancel");
+        cancel_button.set_text(cx, crate::i18n::tr("Cancel"));
         cancel_button.set_enabled(cx, true);
         cancel_button.set_visible(cx, true);
         cancel_button.reset_hover(cx);

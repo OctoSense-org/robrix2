@@ -40,7 +40,7 @@ script_mod! {
         ..mod.widgets.SmallModal
 
         title := ModalTitle {
-            text: "Verification Request"
+            text: #(crate::i18n::tr("Verification Request")) i18n_text: "Verification Request"
         }
 
         body := ModalBody {}
@@ -71,7 +71,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             accept_button := RobrixPositiveIconButton {
@@ -79,7 +79,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Yes"
+                text: #(crate::i18n::tr("Yes")) i18n_text: "Yes"
             }
         }
     }
@@ -287,7 +287,7 @@ impl WidgetMatchEvent for VerificationModal {
                         self.is_comparing_keys = true;
                         accept_button.set_visible(cx, true);
                         accept_button.set_enabled(cx, true);
-                        accept_button.set_text(cx, "Yes");
+                        accept_button.set_text(cx, crate::i18n::tr("Yes"));
                         cancel_button.set_text(cx, "No");
                         cancel_button.set_enabled(cx, true);
                         cancel_button.set_visible(cx, true);
@@ -348,7 +348,7 @@ impl VerificationModal {
         self.is_comparing_keys = false;
         accept_button.set_enabled(cx, false);
         accept_button.set_text(cx, "Waiting…");
-        cancel_button.set_text(cx, "Cancel");
+        cancel_button.set_text(cx, crate::i18n::tr("Cancel"));
         cancel_button.set_enabled(cx, true);
         cancel_button.set_visible(cx, true);
     }
@@ -357,7 +357,7 @@ impl VerificationModal {
     fn transition_to_final_state(&mut self, cx: &mut Cx, accept_button: &ButtonRef, cancel_button: &ButtonRef) {
         accept_button.set_visible(cx, true);
         accept_button.set_enabled(cx, true);
-        accept_button.set_text(cx, "Okay");
+        accept_button.set_text(cx, crate::i18n::tr("Okay"));
         cancel_button.set_visible(cx, false);
         self.is_final = true;
         self.is_comparing_keys = false;
@@ -393,10 +393,10 @@ impl VerificationModal {
 
         let accept_button = self.button(cx, ids!(accept_button));
         let cancel_button = self.button(cx, ids!(cancel_button));
-        accept_button.set_text(cx, "Yes");
+        accept_button.set_text(cx, crate::i18n::tr("Yes"));
         accept_button.set_enabled(cx, !we_started);
         accept_button.set_visible(cx, !we_started);
-        cancel_button.set_text(cx, "Cancel");
+        cancel_button.set_text(cx, crate::i18n::tr("Cancel"));
         cancel_button.set_enabled(cx, true);
         cancel_button.set_visible(cx, true);
 

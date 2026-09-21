@@ -49,12 +49,12 @@ impl AgentRole {
 
     /// Short badge text for this role.
     pub fn label(self) -> &'static str {
-        match self {
+        crate::i18n::tr(match self {
             Self::Coordinator => "coordinator",
             Self::Implementer => "implementer",
             Self::Reviewer => "reviewer",
             Self::FinalReviewer => "final review",
-        }
+        })
     }
 }
 

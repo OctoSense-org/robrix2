@@ -37,6 +37,12 @@ impl From<(String, BeforeText)> for TextPreview {
     }
 }
 impl TextPreview {
+    /// For a direct-chat list, ordinary messages need only their body. State
+    /// events still need the sender as part of the sentence explaining them.
+    pub fn direct_message_body(&self) -> Option<&str> {
+        matches!(self.before_text, BeforeText::UsernameWithColon).then_some(self.text.as_str())
+    }
+
     /// Formats the text preview with the appropriate preceding username.
     pub fn format_with(
         self,
@@ -274,6 +280,11 @@ fn text_preview_of_message(
                 htmlize::escape_text(&video.body)
             }
         ),
+        message if message.msgtype() == crate::mini_app::MSGTYPE => {
+            crate::mini_app::WebMiniApp::from_message(message)
+                .map(|app| format!("[Mini app] {}", htmlize::escape_text(&app.title)))
+                .unwrap_or_else(|_| "[Mini app] Unsupported card".into())
+        }
         MessageType::_Custom(custom) => {
             // Agent-chat approval events are custom msgtypes, so without this they
             // would fall through to the Rust debug formatting below and leak

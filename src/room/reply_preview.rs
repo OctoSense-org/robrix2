@@ -62,7 +62,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE { font_size: 10 },
                     color: (USERNAME_TEXT_COLOR)
                 }
-                text: "<Username not available>"
+                text: #(crate::i18n::tr("<Username not available>"))
             }
         }
 
@@ -161,12 +161,12 @@ script_mod! {
 
         reply_expand_button := mod.widgets.ReplyToggleButton {
             draw_icon +: { svg: (ICON_TRIANGLE_DOWN) }
-            text: "Show more…"
+            text: #(crate::i18n::tr("Show more…")) i18n_text: "Show more…"
         }
 
         reply_collapse_button := mod.widgets.ReplyToggleButton {
             draw_icon +: { svg: (ICON_TRIANGLE_UP) }
-            text: "Show less"
+            text: #(crate::i18n::tr("Show less")) i18n_text: "Show less"
         }
     }
 
@@ -205,7 +205,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE {},
                     color: #222,
                 }
-                text: "Replying to:"
+                text: #(crate::i18n::tr("Replying to:")) i18n_text: "Replying to:"
             }
 
             cancel_reply_button := RobrixNegativeIconButton {
@@ -229,19 +229,64 @@ script_mod! {
             margin: Inset{top: 4, left: 5, right: 5}
         }
     }
+
+    mod.widgets.MobileReplyPreviewContent = CachedView {
+        width: Fill height: Fit flow: Down padding: 0
+        cursor: MouseCursor.Hand
+        draw_bg +: {
+            fade_start: uniform(1.0)
+            fade_end: uniform(1.0)
+            fade_enabled: uniform(0.0)
+            pixel: fn() {
+                let c = self.image.sample(self.pos * self.scale + self.shift)
+                let t = clamp((self.pos.y - self.fade_start) / max(self.fade_end - self.fade_start, 0.0001), 0.0, 1.0)
+                return c * mix(1.0, 1.0 - t * t * (3.0 - 2.0 * t), self.fade_enabled)
+            }
+        }
+        panel := RoundedView {
+            width: Fill height: Fit flow: Down spacing: 3 padding: 8
+            draw_bg +: {color: #xe3e3e3 border_radius: 4}
+            header := View {
+                width: Fill height: Fit flow: Right spacing: 4
+                replying_label := Label {
+                    visible: false text: #(crate::i18n::tr("Replying to:")) i18n_text: "Replying to:"
+                    draw_text +: {color: #x777777 text_style: theme.font_regular {font_size: 9}}
+                }
+                reply_preview_avatar := Avatar {visible: false width: 0 height: 0}
+                reply_preview_username := Label {
+                    width: Fill max_lines: 1 text_overflow: Ellipsis
+                    draw_text +: {color: #x777777 text_style: theme.font_regular {font_size: 9}}
+                }
+            }
+            reply_preview_body := HtmlOrPlaintext {
+                plaintext_view +: {pt_label +: {
+                    draw_text +: {color: #x666666 text_style: theme.font_regular {font_size: 9}}
+                }}
+                html_view +: {html +: {font_size: 9 font_color: #x666666}}
+            }
+        }
+    }
+    mod.widgets.MobileRepliedToMessage = mod.widgets.CollapsiblePreview {
+        expandable: true show_left_bar: false
+        full_show_threshold: 72 collapsed_height: 56 fade_height: 12 texture_max_height: 110
+        padding: 0 margin: 0
+        preview_content := mod.widgets.MobileReplyPreviewContent {}
+    }
+    mod.widgets.MobileReplyingPreview = View {
+        visible: false width: Fill height: Fit flow: Right spacing: 4
+        padding: Inset{bottom: 6} align: Align{y: 0.5}
+        reply_preview_content := mod.widgets.MobileRepliedToMessage {
+            visible: true expandable: false
+            preview_content +: {panel +: {header +: {replying_label.visible: true}}}
+        }
+        cancel_reply_button := RobrixNeutralIconButton {
+            width: 44 height: 44 padding: 12 margin: 0
+            draw_icon +: {svg: ICON_CLOSE color: #x777777}
+            icon_walk: Walk{width: 16 height: 16}
+            draw_bg +: {color: #x00000000 color_hover: #x00000000 border_size: 0}
+        }
+    }
 }
-
-/// If a reply preview exceeds this height, it will be dranw in a collapsed wrapper.
-const REPLY_PREVIEW_FULL_SHOW_THRESHOLD: f64 = 150.0;
-
-/// The height of a collapsed reply preview.
-const REPLY_PREVIEW_COLLAPSED_HEIGHT: f64 = 100.0;
-
-/// The height of the fade effect at the bottom of a collapsed preview.
-const REPLY_PREVIEW_FADE_HEIGHT: f64 = 50.0;
-
-/// Max height of a reply preview's cachedview texture.
-const REPLY_PREVIEW_TEXTURE_MAX_HEIGHT: f64 = 160.0;
 
 /// Padding beneath the bottom of the reply preview's body.
 const REPLY_PREVIEW_BODY_BOTTOM_PADDING: f64 = 10.0;
@@ -259,6 +304,10 @@ pub struct CollapsiblePreview {
     #[live] expandable: bool,
     /// Whether to draw the vertical bar to the left of this in-timeline reply preview.
     #[live] show_left_bar: bool,
+    #[live(150.0)] full_show_threshold: f64,
+    #[live(100.0)] collapsed_height: f64,
+    #[live(50.0)] fade_height: f64,
+    #[live(160.0)] texture_max_height: f64,
     #[rust] is_expanded: bool,
     #[rust] collapsible: bool,
     #[rust] last_drawn_height: f64,
@@ -281,12 +330,12 @@ impl Widget for CollapsiblePreview {
 
         // We only use the off-screen cachedview for too-tall reply previews that should be collapsed,
         // as they need the fade effect. Normal small reply previews just draw directly.
-        let predict_collapsed = self.last_drawn_height > REPLY_PREVIEW_FULL_SHOW_THRESHOLD
+        let predict_collapsed = self.last_drawn_height > self.full_show_threshold
             && !(self.expandable && self.is_expanded);
         if let Some(mut inner) = preview_content.borrow_mut() {
             let optimize = if predict_collapsed { ViewOptimize::Texture } else { ViewOptimize::None };
             inner.set_optimize(cx, optimize);
-            inner.set_texture_max_height(Some(REPLY_PREVIEW_TEXTURE_MAX_HEIGHT));
+            inner.set_texture_max_height(Some(self.texture_max_height));
         }
 
         cx.begin_turtle(
@@ -306,7 +355,7 @@ impl Widget for CollapsiblePreview {
             self.last_drawn_height = body_rect.pos.y + body_rect.size.y
                 + REPLY_PREVIEW_BODY_BOTTOM_PADDING - content_rect.pos.y;
         }
-        self.collapsible = self.last_drawn_height > REPLY_PREVIEW_FULL_SHOW_THRESHOLD;
+        self.collapsible = self.last_drawn_height > self.full_show_threshold;
         let collapsed = self.collapsible && !(self.expandable && self.is_expanded);
 
         // Only apply the fade effect if it was collapsed.
@@ -314,8 +363,8 @@ impl Widget for CollapsiblePreview {
             let (fade_start, fade_end, enabled) = if collapsed {
                 // Bottom fade band of the collapsed window, as fractions of the texture height.
                 (
-                    ((REPLY_PREVIEW_COLLAPSED_HEIGHT - REPLY_PREVIEW_FADE_HEIGHT) / used.y) as f32,
-                    (REPLY_PREVIEW_COLLAPSED_HEIGHT / used.y) as f32,
+                    ((self.collapsed_height - self.fade_height) / used.y) as f32,
+                    (self.collapsed_height / used.y) as f32,
                     1.0,
                 )
             } else {
@@ -328,7 +377,7 @@ impl Widget for CollapsiblePreview {
             }
         }
         if collapsed {
-            cx.turtle_mut().set_used(used.x, REPLY_PREVIEW_COLLAPSED_HEIGHT);
+            cx.turtle_mut().set_used(used.x, self.collapsed_height);
         }
         let inner_rect = cx.end_turtle();
         // We only know the true height after it's first drawn, so use next frame

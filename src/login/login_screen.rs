@@ -1,10 +1,8 @@
-use std::ops::Not;
-
 use makepad_widgets::*;
-use url::Url;
 
 use crate::sliding_sync::{submit_async_request, LoginByPassword, LoginRequest, MatrixRequest};
 
+use super::homeserver::{login_server, password_identifier, LoginMethods};
 use super::login_status_modal::{LoginStatusModalAction, LoginStatusModalWidgetExt};
 
 script_mod! {
@@ -15,33 +13,21 @@ script_mod! {
     mod.widgets.ICON_EYE_OPEN   = crate_resource("self://resources/icons/eye_open.svg")
     mod.widgets.ICON_EYE_CLOSED = crate_resource("self://resources/icons/eye_closed.svg")
 
-    mod.widgets.SsoButton = RoundedView {
-        width: Fit,
-        height: Fit,
-        cursor: MouseCursor.Hand,
-        visible: true,
-        padding: 10,
-        margin: Inset{ left: 16.6, right: 16.6, top: 10, bottom: 10}
+    let ProviderButton = RobrixNeutralIconButton {
+        width: Fill, height: Fill
+        margin: 0
+        padding: Inset{left: 42, right: 10, top: 10, bottom: 10}
+        align: Align{x: 0.5, y: 0.5}
         draw_bg +: {
-            border_size: 0.5
-            border_color: #6c6c6c
-            color: (COLOR_PRIMARY)
+            color: #fff
+            color_hover: #xf5f5f5
+            color_down: #xe5e5e5
+            border_size: 1
+            border_color: #xc8c8c8
+            border_color_hover: #x999999
+            border_color_down: #x777777
         }
     }
-
-    mod.widgets.SsoImage = Image {
-        width: 30, height: 30,
-        draw_bg +: {
-            mask: instance(0.0)
-            pixel: fn() {
-                let color = mix(self.get_color(), #3, self.async_load)
-                let gray = dot(color.rgb, vec3(0.299, 0.587, 0.114))
-                let grayed = mix(color, vec4(gray, gray, gray, color.a), self.mask)
-                return Pal.premul(vec4(grayed.xyz, grayed.w * self.opacity))
-            }
-        }
-    }
-
 
     mod.widgets.LoginScreen = set_type_default() do #(LoginScreen::register_widget(vm)) {
         ..mod.widgets.SolidView
@@ -104,14 +90,20 @@ script_mod! {
                             color: (COLOR_TEXT)
                             text_style: TITLE_TEXT {font_size: 16.0}
                         }
-                        text: "Login to Robrix"
+                        text: #(crate::i18n::tr("Sign in to Robrix")) i18n_text: "Sign in to Robrix"
+                    }
+
+                    View {
+                        width: Fit height: Fit flow: Right spacing: 12
+                        login_language_en := ButtonFlat {text: "English"}
+                        login_language_zh := ButtonFlat {text: "简体中文"}
                     }
 
                     user_id_input := RobrixTextInput {
                         width: 275, height: Fit
                         flow: Flow.Right { wrap: false },
                         padding: 10,
-                        empty_text: "User ID"
+                        empty_text: #(crate::i18n::tr("@name:matrix.org or username")) i18n_empty_text: "@name:matrix.org or username"
                         autocapitalize: None,
                         autocorrect: Disabled,
                         content_type: Username,
@@ -126,7 +118,7 @@ script_mod! {
                             width: Fill, height: Fit
                             flow: Flow.Right { wrap: false },
                             padding: Inset{top: 10, bottom: 10, left: 10, right: 38}
-                            empty_text: "Password"
+                            empty_text: #(crate::i18n::tr("Password")) i18n_empty_text: "Password"
                             is_password: true,
                             autocapitalize: None,
                             autocorrect: Disabled,
@@ -182,7 +174,7 @@ script_mod! {
                             width: 275, height: Fit,
                             flow: Flow.Right { wrap: false },
                             padding: Inset{top: 5, bottom: 5, left: 10, right: 10}
-                            empty_text: "matrix.org"
+                            empty_text: #(crate::i18n::tr("Auto from Matrix ID (matrix.org)")) i18n_empty_text: "Auto from Matrix ID (matrix.org)"
                             autocapitalize: None,
                             autocorrect: Disabled,
                             content_type: Url,
@@ -209,7 +201,7 @@ script_mod! {
                                     color: #8C8C8C
                                     text_style: REGULAR_TEXT {font_size: 9}
                                 }
-                                text: "Homeserver URL (optional)"
+                                text: #(crate::i18n::tr("Your homeserver (name or URL)")) i18n_text: "Your homeserver (name or URL)"
                             }
 
                             LineH { draw_bg.color: #C8C8C8 }
@@ -223,59 +215,60 @@ script_mod! {
                         padding: 10
                         margin: Inset{top: 5, bottom: 10}
                         align: Align{x: 0.5, y: 0.5}
-                        text: "Login"
+                        text: #(crate::i18n::tr("Sign in with password")) i18n_text: "Sign in with password"
                     }
 
-                    LineH {
-                        width: 275
-                        margin: Inset{bottom: -5}
-                        draw_bg.color: #C8C8C8
-                    }
-
-                    Label {
-                        width: Fit, height: Fit
-                        padding: 0,
-                        draw_text +: {
-                            color: (COLOR_TEXT)
-                            text_style: TITLE_TEXT {font_size: 11.0}
-                        }
-                        text: "Or, login with an SSO provider:"
-                    }
-
-                    sso_view := View {
-                        width: 275, height: Fit,
-                        margin: Inset{left: 30, right: 5} // make the inner view 240 pixels wide
-                        flow: Flow.Right{wrap: true},
-                        apple_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
-                                src: crate_resource("self://resources/img/apple.png")
-                            }
-                        }
-                        facebook_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
-                                src: crate_resource("self://resources/img/facebook.png")
-                            }
-                        }
-                        github_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
-                                src: crate_resource("self://resources/img/github.png")
-                            }
-                        }
-                        gitlab_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
-                                src: crate_resource("self://resources/img/gitlab.png")
-                            }
-                        }
-                        google_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
+                    social_login_buttons := View {
+                        width: 275, height: 44
+                        flow: Right
+                        spacing: 11
+                        View {
+                            width: 132, height: Fill
+                            flow: Overlay
+                            align: Align{y: 0.5}
+                            google_login_button := ProviderButton {text: "Google"}
+                            google_icon := Image {
+                                width: 24, height: 24
+                                margin: Inset{left: 14}
+                                fit: ImageFit.Smallest
                                 src: crate_resource("self://resources/img/google.png")
                             }
                         }
-                        twitter_button := mod.widgets.SsoButton {
-                            image := mod.widgets.SsoImage {
-                                src: crate_resource("self://resources/img/x.png")
+                        View {
+                            width: 132, height: Fill
+                            flow: Overlay
+                            align: Align{y: 0.5}
+                            github_login_button := ProviderButton {text: "GitHub"}
+                            github_icon := Image {
+                                width: 24, height: 24
+                                margin: Inset{left: 14}
+                                fit: ImageFit.Smallest
+                                src: crate_resource("self://resources/img/github.png")
                             }
                         }
+                    }
+
+                    browser_login_button := RobrixIconButton {
+                        width: 275, height: 40
+                        padding: 10
+                        align: Align{x: 0.5, y: 0.5}
+                        text: #(crate::i18n::tr("Continue in browser")) i18n_text: "Continue in browser"
+                    }
+
+                    check_server_button := RobrixIconButton {
+                        width: 275, height: 35
+                        padding: 8
+                        align: Align{x: 0.5, y: 0.5}
+                        text: #(crate::i18n::tr("Check server")) i18n_text: "Check server"
+                    }
+                    server_status := Label {
+                        width: 275, height: Fit
+                        flow: Flow.Right{wrap: true}
+                        draw_text +: {
+                            color: COLOR_TEXT
+                            text_style: REGULAR_TEXT {font_size: 10}
+                        }
+                        text: #(crate::i18n::tr("Choose Google, GitHub or another provider in your browser. Leave the server blank for matrix.org or discovery from your Matrix ID.")) i18n_text: "Choose Google, GitHub or another provider in your browser. Leave the server blank for matrix.org or discovery from your Matrix ID."
                     }
 
                     View {
@@ -295,7 +288,7 @@ script_mod! {
                                 color: #x6c6c6c
                                 text_style: REGULAR_TEXT {}
                             }
-                            text: "Don't have an account?"
+                            text: #(crate::i18n::tr("Don't have an account?")) i18n_text: "Don't have an account?"
                         }
 
                         LineH { draw_bg.color: #C8C8C8 }
@@ -306,7 +299,7 @@ script_mod! {
                         padding: Inset{left: 15, right: 15, top: 10, bottom: 10}
                         margin: Inset{bottom: 5}
                         align: Align{x: 0.5, y: 0.5}
-                        text: "Sign up here"
+                        text: #(crate::i18n::tr("Sign up here")) i18n_text: "Sign up here"
                     }
                 }
 
@@ -329,10 +322,11 @@ pub struct LoginScreen {
     #[deref] view: View,
     /// Whether the password field is currently showing plaintext.
     #[rust] password_visible: bool,
-    /// Boolean to indicate if the SSO login process is still in flight
     #[rust] sso_pending: bool,
-    /// The URL to redirect to after logging in with SSO.
-    #[rust] sso_redirect_url: Option<String>,
+    #[rust] login_pending: bool,
+    #[rust] discovery_generation: u64,
+    #[rust] discovery_pending: bool,
+
 }
 
 
@@ -347,209 +341,190 @@ impl Widget for LoginScreen {
     }
 }
 
-impl MatchEvent for LoginScreen {
-    fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
-        let login_button = self.view.button(cx, ids!(login_button));
-        let signup_button = self.view.button(cx, ids!(signup_button));
-        let user_id_input = self.view.text_input(cx, ids!(user_id_input));
-        let password_input = self.view.text_input(cx, ids!(password_input));
-        let homeserver_input = self.view.text_input(cx, ids!(homeserver_input));
-
-        let login_status_modal = self.view.modal(cx, ids!(login_status_modal));
-        let login_status_modal_content = self.view.login_status_modal(cx, ids!(login_status_modal.content));
-
-        // Handle toggling password visibility
-        let show_pw_button = self.view.button(cx, ids!(show_password_button));
-        let hide_pw_button = self.view.button(cx, ids!(hide_password_button));
-        if show_pw_button.clicked(actions) || hide_pw_button.clicked(actions) {
-            self.password_visible = !self.password_visible;
-            password_input.toggle_is_password(cx);
-            show_pw_button.set_visible(cx, !self.password_visible);
-            hide_pw_button.set_visible(cx, self.password_visible);
-            password_input.set_key_focus(cx);
-            self.redraw(cx);
-        }
-
-        if signup_button.clicked(actions) {
-            log!("Opening URL \"{}\"", MATRIX_SIGN_UP_URL);
-            let _ = robius_open::Uri::new(MATRIX_SIGN_UP_URL).open();
-        }
-
-        if login_button.clicked(actions)
-            || user_id_input.returned(actions).is_some()
-            || password_input.returned(actions).is_some()
-            || homeserver_input.returned(actions).is_some()
-        {
-            let user_id = user_id_input.text();
-            let password = password_input.text();
-            let homeserver = homeserver_input.text();
-            if user_id.is_empty() {
-                login_status_modal_content.set_title(cx, "Missing User ID");
-                login_status_modal_content.set_status(cx, "Please enter a valid User ID.");
-                login_status_modal_content.button_ref(cx).set_text(cx, "Okay");
-            } else if password.is_empty() {
-                login_status_modal_content.set_title(cx, "Missing Password");
-                login_status_modal_content.set_status(cx, "Please enter a valid password.");
-                login_status_modal_content.button_ref(cx).set_text(cx, "Okay");
-            } else {
-                login_status_modal_content.set_title(cx, "Logging in...");
-                login_status_modal_content.set_status(cx, "Waiting for a login response...");
-                login_status_modal_content.button_ref(cx).set_text(cx, "Cancel");
-                submit_async_request(MatrixRequest::Login(LoginRequest::LoginByPassword(LoginByPassword {
-                    user_id,
-                    password,
-                    homeserver: homeserver.is_empty().not().then_some(homeserver),
-                })));
-            }
-            login_status_modal.open(cx);
-            self.redraw(cx);
-        }
-        
-        let provider_brands = ["apple", "facebook", "github", "gitlab", "google", "twitter"];
-        let button_set: &[&[LiveId]] = ids_array!(
-            apple_button, 
-            facebook_button, 
-            github_button, 
-            gitlab_button, 
-            google_button, 
-            twitter_button
-        );
-        for action in actions {
-            if let LoginStatusModalAction::Close = action.as_widget_action().cast() {
-                login_status_modal.close(cx);
-            }
-
-            // Handle login-related actions received from background async tasks.
-            match action.downcast_ref() {
-                Some(LoginAction::CliAutoLogin { user_id, homeserver }) => {
-                    user_id_input.set_text(cx, user_id);
-                    password_input.set_text(cx, "");
-                    homeserver_input.set_text(cx, homeserver.as_deref().unwrap_or_default());
-                    login_status_modal_content.set_title(cx, "Logging in via CLI...");
-                    login_status_modal_content.set_status(
-                        cx,
-                        &format!("Auto-logging in as user {user_id}...")
-                    );
-                    let login_status_modal_button = login_status_modal_content.button_ref(cx);
-                    login_status_modal_button.set_text(cx, "Cancel");
-                    login_status_modal_button.set_enabled(cx, false); // Login cancel not yet supported
-                    login_status_modal.open(cx);
-                }
-                Some(LoginAction::Status { title, status }) => {
-                    login_status_modal_content.set_title(cx, title);
-                    login_status_modal_content.set_status(cx, status);
-                    let login_status_modal_button = login_status_modal_content.button_ref(cx);
-                    login_status_modal_button.set_text(cx, "Cancel");
-                    login_status_modal_button.set_enabled(cx, true);
-                    login_status_modal.open(cx);
-                    self.redraw(cx);
-                }
-                Some(LoginAction::LoginSuccess) => {
-                    // The main `App` component handles showing the main screen
-                    // and hiding the login screen & login status modal.
-                    user_id_input.set_text(cx, "");
-                    password_input.set_text(cx, "");
-                    homeserver_input.set_text(cx, "");
-                    login_status_modal.close(cx);
-                    self.redraw(cx);
-                }
-                Some(LoginAction::LoginFailure(error)) => {
-                    login_status_modal_content.set_title(cx, "Login Failed.");
-                    login_status_modal_content.set_status(cx, error);
-                    let login_status_modal_button = login_status_modal_content.button_ref(cx);
-                    login_status_modal_button.set_text(cx, "Okay");
-                    login_status_modal_button.set_enabled(cx, true);
-                    login_status_modal.open(cx);
-                    self.redraw(cx);
-                }
-                Some(LoginAction::SsoPending(pending)) => {
-                    let mask = if *pending { 1.0 } else { 0.0 };
-                    let cursor = if *pending { MouseCursor::NotAllowed } else { MouseCursor::Hand };
-                    for view_ref in self.view_set(cx, button_set).iter() {
-                        let Some(mut view_mut) = view_ref.borrow_mut() else { continue };
-                        let mut image = view_mut.image(cx, ids!(image));
-                        script_apply_eval!(cx, image, {
-                            draw_bg.mask: #(mask)
-                        });
-                        view_mut.cursor = Some(cursor);
-                    }
-                    self.sso_pending = *pending;
-                    self.redraw(cx);
-                }
-                Some(LoginAction::SsoSetRedirectUrl(url)) => {
-                    self.sso_redirect_url = Some(url.to_string());
-                }
-                _ => { }
-            }
-        }
-
-        // If the Login SSO screen's "cancel" button was clicked, send a http request to gracefully shutdown the SSO server
-        if let Some(sso_redirect_url) = &self.sso_redirect_url {
-            let login_status_modal_button = login_status_modal_content.button_ref(cx);
-            if login_status_modal_button.clicked(actions) {
-                let request_id = id!(SSO_CANCEL_BUTTON);
-                let request = HttpRequest::new(format!("{}/?login_token=",sso_redirect_url), HttpMethod::GET);
-                cx.http_request(request_id, request);
-                self.sso_redirect_url = None;
-            }
-        }
-
-        // On iOS there's no redirect server, so the cancel button dismisses
-        // the auth sheet instead. Its completion handler takes the normal
-        // SSO failure path, which resets state for the next attempt.
-        #[cfg(target_os = "ios")]
-        if self.sso_pending {
-            let login_status_modal_button = login_status_modal_content.button_ref(cx);
-            if login_status_modal_button.clicked(actions) {
-                crate::sliding_sync::cancel_active_sso_auth_session();
-            }
-        }
-
-        // Handle any of the SSO login buttons being clicked
-        for (view_ref, brand) in self.view_set(cx, button_set).iter().zip(&provider_brands) {
-            if view_ref.finger_up(actions).is_some() && !self.sso_pending {
-                submit_async_request(MatrixRequest::SpawnSSOServer{
-                    identity_provider_id: format!("oidc-{}",brand),
-                    brand: brand.to_string(),
-                    homeserver_url: homeserver_input.text()
-                });
-            }
-        }
+impl LoginScreen {
+    fn show_status(&mut self, cx: &mut Cx, title: &str, status: &str, button: &str, enabled: bool) {
+        let content = self.view.login_status_modal(cx, ids!(login_status_modal.content));
+        content.set_title(cx, title);
+        content.set_status(cx, status);
+        content.button_ref(cx).set_text(cx, button);
+        content.button_ref(cx).set_enabled(cx, enabled);
+        self.view.modal(cx, ids!(login_status_modal)).open(cx);
+        self.redraw(cx);
     }
 
+    fn check_server(&mut self, cx: &mut Cx, user: String, server: String) {
+        self.discovery_generation += 1;
+        let generation = self.discovery_generation;
+        self.discovery_pending = true;
+        self.view.label(cx, ids!(server_status)).set_text(cx, crate::i18n::tr("Checking homeserver and sign-in methods…"));
+        crate::sliding_sync::spawn_async_task(async move {
+            let result = super::homeserver::discover(&user, &server).await.map_err(|e| e.to_string());
+            Cx::post_action(LoginAction::ServerDiscovered { generation, result });
+        });
+    }
 }
 
-/// Actions sent to or from the login screen.
+impl MatchEvent for LoginScreen {
+    fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for (path, language) in [(ids!(login_language_en), crate::i18n::Language::English), (ids!(login_language_zh), crate::i18n::Language::Chinese)] {
+            if self.view.button(cx, path).clicked(actions) {
+                if let Err(error) = crate::i18n::set_language(cx, language) {
+                    crate::shared::popup_list::enqueue_popup_notification(crate::i18n::format("Could not save language: {error}", &[("error", error.to_string())]), crate::shared::popup_list::PopupKind::Error, Some(5.0));
+                }
+            }
+        }
+        let user_input = self.view.text_input(cx, ids!(user_id_input));
+        let password_input = self.view.text_input(cx, ids!(password_input));
+        let server_input = self.view.text_input(cx, ids!(homeserver_input));
+        let modal = self.view.modal(cx, ids!(login_status_modal));
+        let user = user_input.text().trim().to_owned();
+        let server = server_input.text().trim().to_owned();
+
+        let show = self.view.button(cx, ids!(show_password_button));
+        let hide = self.view.button(cx, ids!(hide_password_button));
+        if show.clicked(actions) || hide.clicked(actions) {
+            self.password_visible = !self.password_visible;
+            password_input.toggle_is_password(cx);
+            show.set_visible(cx, !self.password_visible);
+            hide.set_visible(cx, self.password_visible);
+            password_input.set_key_focus(cx);
+        }
+        if user_input.changed(actions).is_some() || server_input.changed(actions).is_some() {
+            self.discovery_generation += 1;
+            self.discovery_pending = false;
+            self.view.label(cx, ids!(server_status)).set_text(cx, crate::i18n::tr("Check server to see its available sign-in methods."));
+        }
+        if self.view.button(cx, ids!(signup_button)).clicked(actions) {
+            let _ = robius_open::Uri::new(MATRIX_SIGN_UP_URL).open();
+        }
+        if !self.login_pending && !self.discovery_pending && (
+            self.view.button(cx, ids!(check_server_button)).clicked(actions)
+            || server_input.returned(actions).is_some()
+        ) {
+            self.check_server(cx, user.clone(), server.clone());
+        }
+        if !self.login_pending && (
+            self.view.button(cx, ids!(login_button)).clicked(actions)
+            || user_input.returned(actions).is_some()
+            || password_input.returned(actions).is_some()
+        ) {
+            let destination = login_server(&user, Some(&server)).and_then(|server| {
+                password_identifier(&user)?;
+                if password_input.text().is_empty() { anyhow::bail!(crate::i18n::tr("Enter your password, or choose Continue in browser.")); }
+                Ok(server)
+            });
+            match destination {
+                Ok(destination) => {
+                    self.login_pending = true;
+                    self.show_status(cx, crate::i18n::tr("Signing in"), &crate::i18n::format("Connecting to {destination}…", &[("destination", (destination).to_string())]), crate::i18n::tr("Please wait…"), false);
+                    submit_async_request(MatrixRequest::Login(LoginRequest::LoginByPassword(LoginByPassword {
+                        user_id: user.clone(), password: password_input.text(), homeserver: Some(destination),
+                    })));
+                }
+                Err(error) => self.show_status(cx, crate::i18n::tr("Check sign-in details"), &error.to_string(), crate::i18n::tr("Okay"), true),
+            }
+        }
+        // Social shortcuts use the selected server's provider chooser. Provider
+        // IDs are server-defined, and matrix.org now delegates this page to MAS.
+        let browser_login_clicked = [ids!(browser_login_button), ids!(google_login_button), ids!(github_login_button)]
+            .into_iter().any(|id| self.view.button(cx, id).clicked(actions));
+        if !self.login_pending && browser_login_clicked {
+            match login_server(&user, Some(&server)) {
+                Ok(destination) => {
+                    self.login_pending = true;
+                    self.sso_pending = true;
+                    self.show_status(cx, crate::i18n::tr("Connecting to your server"), &crate::i18n::format("Checking browser sign-in for {destination}…", &[("destination", (destination).to_string())]), crate::i18n::tr("Cancel"), true);
+                    submit_async_request(MatrixRequest::SpawnSSOServer { homeserver_url: destination });
+                }
+                Err(error) => self.show_status(cx, crate::i18n::tr("Check your homeserver"), &error.to_string(), crate::i18n::tr("Okay"), true),
+            }
+        }
+
+        for action in actions {
+            if let LoginStatusModalAction::Close = action.as_widget_action().cast() {
+                if self.sso_pending {
+                    submit_async_request(MatrixRequest::CancelSsoLogin);
+                    self.show_status(cx, crate::i18n::tr("Cancelling sign-in"), crate::i18n::tr("Closing the sign-in connection…"), crate::i18n::tr("Please wait…"), false);
+                } else if !self.login_pending {
+                    modal.close(cx);
+                }
+            }
+            match action.downcast_ref() {
+                Some(LoginAction::ServerDiscovered { generation, result }) if *generation == self.discovery_generation => {
+                    self.discovery_pending = false;
+                    let text = match result {
+                        Ok(methods) => {
+                            let mut available = Vec::new();
+                            if methods.password { available.push(crate::i18n::tr("Password")); }
+                            if methods.sso { available.push(crate::i18n::tr("Browser SSO")); }
+                            let methods_text = if available.is_empty() {
+                                crate::i18n::tr("No supported sign-in method. OAuth-only and QR sign-in are not supported yet.").to_owned()
+                            } else { available.join(" · ") };
+                            let providers = if methods.providers.is_empty() { String::new() } else { format!("\n{}", methods.providers.join(", ")) };
+                            format!("{}\n{methods_text}{providers}", methods.homeserver)
+                        }
+                        Err(error) => crate::i18n::format("Could not check this server: {error}", &[("error", (error).to_string())]),
+                    };
+                    self.view.label(cx, ids!(server_status)).set_text(cx, &text);
+                }
+                Some(LoginAction::CliAutoLogin { user_id, homeserver }) => {
+                    self.login_pending = true;
+                    user_input.set_text(cx, user_id);
+                    password_input.set_text(cx, "");
+                    server_input.set_text(cx, homeserver.as_deref().unwrap_or_default());
+                    self.show_status(cx, crate::i18n::tr("Signing in"), crate::i18n::tr("Connecting to your account…"), crate::i18n::tr("Please wait…"), false);
+                }
+                Some(LoginAction::Status { title, status }) => {
+                    self.login_pending = true;
+                    self.show_status(cx, title, status, if self.sso_pending { crate::i18n::tr("Cancel") } else { crate::i18n::tr("Please wait…") }, self.sso_pending);
+                }
+                Some(LoginAction::LoginSuccess) => {
+                    self.login_pending = false;
+                    self.sso_pending = false;
+                    user_input.set_text(cx, "");
+                    password_input.set_text(cx, "");
+                    server_input.set_text(cx, "");
+                    if self.password_visible {
+                        self.password_visible = false;
+                        password_input.toggle_is_password(cx);
+                        show.set_visible(cx, true);
+                        hide.set_visible(cx, false);
+                    }
+                    modal.close(cx);
+                }
+                Some(LoginAction::LoginFailure(error)) => {
+                    self.login_pending = false;
+                    self.sso_pending = false;
+                    self.show_status(cx, crate::i18n::tr("Sign-in failed"), error, crate::i18n::tr("Okay"), true);
+                }
+                Some(LoginAction::SsoPending(pending)) => self.sso_pending = *pending,
+                Some(LoginAction::Cancelled) => {
+                    self.login_pending = false;
+                    self.sso_pending = false;
+                    modal.close(cx);
+                }
+                _ => {}
+            }
+        }
+        self.view.button(cx, ids!(login_button)).set_enabled(cx, !self.login_pending);
+        self.view.button(cx, ids!(browser_login_button)).set_enabled(cx, !self.login_pending);
+        self.view.button(cx, ids!(google_login_button)).set_enabled(cx, !self.login_pending);
+        self.view.button(cx, ids!(github_login_button)).set_enabled(cx, !self.login_pending);
+        self.view.button(cx, ids!(check_server_button)).set_enabled(cx, !self.login_pending && !self.discovery_pending);
+        self.redraw(cx);
+    }
+}
+
+/// Actions sent to or from the login screen. Never include a password or token.
 #[derive(Clone, Default, Debug)]
 pub enum LoginAction {
-    /// A positive response from the backend Matrix task to the login screen.
     LoginSuccess,
-    /// A negative response from the backend Matrix task to the login screen.
     LoginFailure(String),
-    /// A login-related status message to display to the user.
-    Status {
-        title: String,
-        status: String,
-    },
-    /// The given login info was specified on the command line (CLI),
-    /// and the login process is underway.
-    CliAutoLogin {
-        user_id: String,
-        homeserver: Option<String>,
-    },
-    /// An acknowledgment that is sent from the backend Matrix task to the login screen
-    /// informing it that the SSO login process is either still in flight (`true`) or has finished (`false`).
-    ///
-    /// Note that an inner value of `false` does *not* imply that the login request has
-    /// successfully finished. 
-    /// The login screen can use this to prevent the user from submitting
-    /// additional SSO login requests while a previous request is in flight. 
+    Status { title: String, status: String },
+    CliAutoLogin { user_id: String, homeserver: Option<String> },
     SsoPending(bool),
-    /// Set the SSO redirect URL in the LoginScreen.
-    ///
-    /// When an SSO-based login is pendng, pressing the cancel button will send
-    /// an HTTP request to this SSO server URL to gracefully shut it down.
-    SsoSetRedirectUrl(Url),
+    Cancelled,
+    ServerDiscovered { generation: u64, result: Result<LoginMethods, String> },
     #[default]
     None,
 }

@@ -118,7 +118,7 @@ impl Widget for JumpToBottomButton {
                 cx.widget_action(
                     self.widget_uid(), 
                     TooltipAction::HoverIn {
-                        text: "Jump to bottom".to_string(),
+                        text: crate::i18n::tr("Jump to bottom").to_string(),
                         widget_rect: button_area.rect(cx),
                         options: CalloutTooltipOptions {
                             position: TooltipPosition::Left,

@@ -48,7 +48,7 @@ script_mod! {
                 color: (MESSAGE_TEXT_COLOR),
                 text_style: MESSAGE_TEXT_STYLE { font_size: 10.0 },
             }
-            text: "Send your location to this room?"
+            text: #(crate::i18n::tr("Send your location to this room?")) i18n_text: "Send your location to this room?"
         }
 
         location_label := Label {
@@ -61,7 +61,7 @@ script_mod! {
                 color: (MESSAGE_TEXT_COLOR),
                 text_style: MESSAGE_TEXT_STYLE {},
             }
-            text: "➡ Fetching current location..."
+            text: #(crate::i18n::tr("➡ Fetching current location...")) i18n_text: "➡ Fetching current location..."
         }
 
         View {
@@ -76,7 +76,7 @@ script_mod! {
                 margin: 0
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1, top: -1} }
-                text: "Cancel"
+                text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
             }
 
             send_location_button := RobrixPositiveIconButton {
@@ -87,7 +87,7 @@ script_mod! {
                 margin: 0
                 draw_icon.svg: (ICON_SEND)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Yes"
+                text: #(crate::i18n::tr("Yes")) i18n_text: "Yes"
             }
         }
     }

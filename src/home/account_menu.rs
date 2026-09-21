@@ -159,7 +159,7 @@ script_mod! {
                             color: (mod.widgets.RBX_FG_PRIMARY)
                             text_style: (mod.widgets.RBX_TEXT_BODY_STRONG)
                         }
-                        text: "Display Name"
+                        text: #(crate::i18n::tr("Display Name"))
                     }
                     active_user_id := Label {
                         width: Fill, height: Fit,
@@ -169,7 +169,7 @@ script_mod! {
                             color: (mod.widgets.RBX_FG_SECONDARY)
                             text_style: (mod.widgets.RBX_TEXT_META)
                         }
-                        text: "@user:server"
+                        text: #(crate::i18n::tr("@user:server")) i18n_text: "@user:server"
                     }
                 }
 
@@ -182,7 +182,7 @@ script_mod! {
                         color: (mod.widgets.RBX_ACCENT)
                         text_style: theme.font_bold { font_size: 10.5 }
                     }
-                    text: "Active"
+                    text: #(crate::i18n::tr("Active"))
                 }
             }
 
@@ -194,11 +194,11 @@ script_mod! {
             // --- Actions ---
             settings_item := mod.widgets.AccountMenuItem {
                 draw_icon +: { svg: (ICON_SETTINGS) }
-                text: "Account Settings"
+                text: #(crate::i18n::tr("Account Settings")) i18n_text: "Account Settings"
             }
             logout_item := mod.widgets.AccountMenuDangerItem {
                 draw_icon +: { svg: (ICON_LOGOUT) }
-                text: "Log Out"
+                text: #(crate::i18n::tr("Log Out")) i18n_text: "Log Out"
             }
         }
     }

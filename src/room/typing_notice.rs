@@ -32,7 +32,7 @@ script_mod! {
                 color: (TYPING_NOTICE_TEXT_COLOR),
                 text_style: REGULAR_TEXT {font_size: 9}
             }
-            text: "Someone is typing"
+            text: #(crate::i18n::tr("Someone is typing")) i18n_text: "Someone is typing"
         }
 
         bouncing_dots := BouncingDots {

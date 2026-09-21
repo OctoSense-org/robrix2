@@ -70,17 +70,21 @@ script_mod! {
 
             upload_photo_video_button := mod.widgets.RoomInputPopupMenuButton {
                 draw_icon.svg: (ICON_ADD_PHOTO)
-                text: "Upload photo or video"
+                text: #(crate::i18n::tr("Upload photo or video")) i18n_text: "Upload photo or video"
             }
 
             upload_file_button := mod.widgets.RoomInputPopupMenuButton {
                 draw_icon.svg: (ICON_ADD_ATTACHMENT)
-                text: "Upload file"
+                text: #(crate::i18n::tr("Upload file")) i18n_text: "Upload file"
             }
 
             send_location_button := mod.widgets.RoomInputPopupMenuButton {
                 draw_icon.svg: (ICON_LOCATION_PIN)
-                text: "Send current location"
+                text: #(crate::i18n::tr("Send current location")) i18n_text: "Send current location"
+            }
+            share_mini_app_button := mod.widgets.RoomInputPopupMenuButton {
+                draw_icon.svg: (ICON_ADD_ATTACHMENT)
+                text: #(crate::i18n::tr("Share mini app")) i18n_text: "Share mini app"
             }
         }
     }
@@ -98,6 +102,7 @@ pub enum RoomInputPopupMenuAction {
     UploadFile,
     /// Emitted by the RoomInputPopupMenu when the send location button is clicked.
     SendCurrentLocation,
+    ShareMiniApp,
     #[default]
     None,
 }
@@ -142,6 +147,8 @@ impl WidgetMatchEvent for RoomInputPopupMenu {
             RoomInputPopupMenuAction::UploadFile
         } else if self.button(cx, ids!(send_location_button)).clicked(actions) {
             RoomInputPopupMenuAction::SendCurrentLocation
+        } else if self.button(cx, ids!(share_mini_app_button)).clicked(actions) {
+            RoomInputPopupMenuAction::ShareMiniApp
         } else {
             RoomInputPopupMenuAction::None
         };
@@ -176,6 +183,7 @@ impl RoomInputPopupMenu {
         self.button(cx, ids!(upload_photo_video_button)).reset_hover(cx);
         self.button(cx, ids!(upload_file_button)).reset_hover(cx);
         self.button(cx, ids!(send_location_button)).reset_hover(cx);
+        self.button(cx, ids!(share_mini_app_button)).reset_hover(cx);
     }
 
     pub fn is_event_within_popup_menu(&self, cx: &mut Cx, event: &Event) -> bool {

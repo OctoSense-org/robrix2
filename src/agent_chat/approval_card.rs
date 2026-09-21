@@ -213,7 +213,8 @@ script_mod! {
                 text_style: (mod.widgets.RBX_TEXT_META)
                 color: (mod.widgets.RBX_FG_SECONDARY)
             }
-            text: "Text replies are not approval. Only these buttons send a structured verdict, and the agent-chat server makes the final decision."
+            text: #(crate::i18n::tr("Use these buttons to approve or deny. Text replies do not grant approval. Hagency validates the final decision."))
+            i18n_text: "Use these buttons to approve or deny. Text replies do not grant approval. Hagency validates the final decision."
         }
     }
 }
@@ -284,7 +285,7 @@ impl AgentApprovalCard {
             ApprovalDecisionState::Sending(action) => ("Sending…", false, Some(action)),
             ApprovalDecisionState::Sent(action) => ("Decided", false, Some(action)),
         };
-        self.view.label(cx, ids!(header.status_badge.status_label)).set_text(cx, status_text);
+        self.view.label(cx, ids!(header.status_badge.status_label)).set_text(cx, crate::i18n::tr(status_text));
 
         self.actions = if live_buttons { state.actions.clone() } else { Vec::new() };
         let mut any_button_visible = false;
@@ -294,10 +295,10 @@ impl AgentApprovalCard {
             let (visible, text, enabled) = match (offered, chosen) {
                 // After a decision, keep only the chosen button as a disabled receipt.
                 (Some(action), Some(chosen_action)) if chosen_action.id == id => {
-                    (true, format!("✓ {}", action.label), false)
+                    (true, format!("✓ {}", crate::i18n::tr(&action.label)), false)
                 }
                 (Some(_), Some(_)) => (false, String::new(), false),
-                (Some(action), None) => (live_buttons, action.label.clone(), live_buttons),
+                (Some(action), None) => (live_buttons, crate::i18n::tr(&action.label).to_owned(), live_buttons),
                 (None, _) => (false, String::new(), false),
             };
             button.set_visible(cx, visible);

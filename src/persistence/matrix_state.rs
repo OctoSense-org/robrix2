@@ -383,7 +383,7 @@ pub async fn save_session(
         .session()
         .ok_or_else(|| anyhow!("A logged-in client should have a session"))?;
 
-    save_latest_user_id(&user_session.meta.user_id).await?;
+    let user_id = user_session.meta.user_id.clone();
     let sliding_sync_version = client.sliding_sync_version().into();
     // Save that user's session.
     let session_file = session_file_path(&user_session.meta.user_id);
@@ -396,10 +396,42 @@ pub async fn save_session(
     if let Some(parent) = session_file.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::write(&session_file, serialized_session).await?;
+    write_private_session(&session_file, serialized_session.as_bytes()).await?;
+    save_latest_user_id(&user_id).await?;
 
     log!("Session persisted to: {}", session_file.display());
     Ok(())
+}
+
+/// Atomically replace the token-bearing session with owner-only permissions.
+async fn write_private_session(path: &std::path::Path, data: &[u8]) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let temporary = path.with_extension(format!("{:016x}.tmp", rand::random::<u64>()));
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&temporary).await?;
+    let result = async {
+        file.write_all(data).await?;
+        file.sync_all().await?;
+        tokio::fs::rename(&temporary, path).await
+    }.await;
+    if result.is_err() { let _ = tokio::fs::remove_file(&temporary).await; }
+    result?;
+    Ok(())
+}
+
+/// Refresh tokens rotate. Persist both tokens before the next app restart.
+pub async fn save_refreshed_session(client: &Client) -> anyhow::Result<()> {
+    let session = client.matrix_auth().session()
+        .ok_or_else(|| anyhow!("No Matrix session to persist"))?;
+    let path = session_file_path(&session.meta.user_id);
+    // Logout may already have removed this session. Never recreate it here.
+    let mut stored: FullSessionPersisted = serde_json::from_slice(&tokio::fs::read(&path).await?)?;
+    if stored.user_session.meta != session.meta { bail!("Session changed while refreshing tokens"); }
+    stored.user_session = session;
+    write_private_session(&path, &serde_json::to_vec(&stored)?).await
 }
 
 /// Remove the LATEST_USER_ID_FILE_NAME file if it exists

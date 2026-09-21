@@ -65,7 +65,7 @@ script_mod! {
                     text_style: TITLE_TEXT {font_size: 16},
                     color: #000
                 }
-                text: "View Event Source"
+                text: #(crate::i18n::tr("View Event Source")) i18n_text: "View Event Source"
             }
 
             close_button := RobrixIconButton {
@@ -99,7 +99,7 @@ script_mod! {
                     text_style: REGULAR_TEXT {font_size: 11},
                     color: #666
                 }
-                text: "Room ID:"
+                text: #(crate::i18n::tr("Room ID:")) i18n_text: "Room ID:"
             }
             room_id_value := Label {
                 width: Fit, height: Fit,
@@ -109,7 +109,7 @@ script_mod! {
                     text_style: theme.font_code {font_size: 10},
                     color: #000
                 }
-                text: "<Unknown Room ID>"
+                text: #(crate::i18n::tr("<Unknown Room ID>")) i18n_text: "<Unknown Room ID>"
             }
             room_id_copy_button := mod.widgets.CopyButton {
                 margin: Inset{left: 4}
@@ -130,7 +130,7 @@ script_mod! {
                     text_style: REGULAR_TEXT {font_size: 11},
                     color: #666
                 }
-                text: "Event ID:"
+                text: #(crate::i18n::tr("Event ID:")) i18n_text: "Event ID:"
             }
             event_id_value := Label {
                 width: Fit, height: Fit,
@@ -140,7 +140,7 @@ script_mod! {
                     text_style: theme.font_code {font_size: 10},
                     color: #000
                 }
-                text: "<Unknown Event ID>"
+                text: #(crate::i18n::tr("<Unknown Event ID>")) i18n_text: "<Unknown Event ID>"
             }
             event_id_copy_button := mod.widgets.CopyButton {
                 margin: Inset{left: 4}
@@ -165,7 +165,7 @@ script_mod! {
                     text_style: TITLE_TEXT {font_size: 13},
                     color: #000
                 }
-                text: "Latest event source"
+                text: #(crate::i18n::tr("Latest event source")) i18n_text: "Latest event source"
             }
 
             copy_source_button := mod.widgets.CopyButton {}
@@ -188,7 +188,7 @@ script_mod! {
                     word_wrap: true
                     draw_text +: { text_style +: { font_size: 11 } }
                 }
-                text: "<Unknown Event Source>"
+                text: #(crate::i18n::tr("<Unknown Event Source>"))
             }
 
             // Border overlay frame (drawn on top of content)

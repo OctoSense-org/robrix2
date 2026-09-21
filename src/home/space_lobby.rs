@@ -161,7 +161,7 @@ script_mod! {
                     )
                 }
             }
-            text: "Explore this Space"
+            text: #(crate::i18n::tr("Explore this Space")) i18n_text: "Explore this Space"
         }
 
         animator: Animator{
@@ -351,7 +351,7 @@ script_mod! {
                         padding: 0
                         margin: 0
                         width: Fit, height: Fit,
-                        text: "Suggested"
+                        text: #(crate::i18n::tr("Suggested")) i18n_text: "Suggested"
                         draw_text +: { text_style: REGULAR_TEXT {font_size: 8.5}, color: (COLOR_INFO_BLUE) }
                     }
                 }
@@ -391,7 +391,7 @@ script_mod! {
                 spacing: 0
                 icon_walk: Walk{width: 0, height: 0}
                 draw_text.text_style: REGULAR_TEXT {font_size: 9.5}
-                text: "Join"
+                text: #(crate::i18n::tr("Join")) i18n_text: "Join"
             }
 
             view_button := RobrixIconButton {
@@ -400,7 +400,7 @@ script_mod! {
                 spacing: 0
                 icon_walk: Walk{width: 0, height: 0}
                 draw_text.text_style: REGULAR_TEXT {font_size: 9.5}
-                text: "View"
+                text: #(crate::i18n::tr("View")) i18n_text: "View"
             }
 
             leave_button := RobrixNegativeIconButton {
@@ -409,7 +409,7 @@ script_mod! {
                 spacing: 0
                 icon_walk: Walk{width: 0, height: 0}
                 draw_text.text_style: REGULAR_TEXT {font_size: 9.5}
-                text: "Leave"
+                text: #(crate::i18n::tr("Leave")) i18n_text: "Leave"
             }
         }
 
@@ -462,7 +462,7 @@ script_mod! {
                 color: #737373,
                 text_style: REGULAR_TEXT {font_size: 10}
             }
-            text: "Loading rooms and spaces..."
+            text: #(crate::i18n::tr("Loading rooms and spaces...")) i18n_text: "Loading rooms and spaces..."
         }
     }
 
@@ -500,7 +500,7 @@ script_mod! {
                     text_style: REGULAR_TEXT {font_size: 9},
                     color: #888,
                 }
-                text: "Loading..."
+                text: #(crate::i18n::tr("Loading...")) i18n_text: "Loading..."
             }
         }
 
@@ -546,13 +546,13 @@ script_mod! {
                         text_style: REGULAR_TEXT {font_size: 10},
                         color: #737373,
                     }
-                    text: "Welcome to the space:"
+                    text: #(crate::i18n::tr("Welcome to the space:")) i18n_text: "Welcome to the space:"
                 }
 
                 // Filter input bar for searching rooms/spaces in this space
                 filter_bar := mod.widgets.RoomFilterInputBar {
                     input +: {
-                        empty_text: "Filter this space..."
+                        empty_text: #(crate::i18n::tr("Filter this space...")) i18n_empty_text: "Filter this space..."
                     }
                 }
             }
@@ -590,7 +590,7 @@ script_mod! {
                     padding: 12,
                     draw_icon.svg: (ICON_ADD_USER)
                     icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                    text: "Invite"
+                    text: #(crate::i18n::tr("Invite")) i18n_text: "Invite"
                 }
             }
 
@@ -1258,7 +1258,7 @@ impl Widget for SpaceLobbyScreen {
                 // Draw loading indicator
                 let item = if self.is_loading && item_id == 0 {
                     let item = list.item(cx, item_id, id!(status_label));
-                    item.child_by_path(ids!(label)).as_label().set_text(cx, "Loading rooms and spaces...");
+                    item.child_by_path(ids!(label)).as_label().set_text(cx, crate::i18n::tr("Loading rooms and spaces..."));
                     item.child_by_path(ids!(loading_spinner)).set_visible(cx, true);
                     item
                 }

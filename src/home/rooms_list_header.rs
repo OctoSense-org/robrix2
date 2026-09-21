@@ -42,7 +42,7 @@ script_mod! {
             flow: Flow.Right { wrap: false },
             max_lines: 1,
             text_overflow: Ellipsis,
-            text: "All Rooms"
+            text: #(crate::i18n::tr("Chats")) i18n_text: "Chats"
             draw_text +: {
                 color: (RBX_FG_PRIMARY)
                 // Regular weight (thinner) — reads as a title via size, not boldness.
@@ -263,7 +263,7 @@ impl Widget for RoomsListHeader {
                             self.displayed_space = Some(space_name_id.room_id().clone());
                         }
                         _ => {
-                            header_title.set_text(cx, "All Rooms");
+                            header_title.set_text(cx, crate::i18n::tr("Chats"));
                             self.displayed_space = None;
                         }
                     }

@@ -236,7 +236,15 @@ script_mod! {
         flow: Down,
 
         TitleLabel {
-            text: "App Settings"
+            text: #(crate::i18n::tr("App Settings")) i18n_text: "App Settings"
+        }
+
+        View {
+            width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 12
+            SubsectionLabel {text: #(crate::i18n::tr("Language")) i18n_text: "Language"}
+            language_dropdown := mod.widgets.RobrixSettingsDropDown {
+                labels: ["English", "简体中文"] selected_item: 0
+            }
         }
 
         View {
@@ -247,16 +255,16 @@ script_mod! {
             SubsectionLabel {
                 width: Fit,
                 margin: Inset{top: 4}
-                text: "Force View Mode:"
+                text: #(crate::i18n::tr("Force View Mode:")) i18n_text: "Force View Mode:"
             }
 
             view_mode_dropdown := mod.widgets.RobrixSettingsDropDown {
-                labels: ["Automatic (default)", "Force wide (desktop)", "Force narrow (mobile)"]
+                labels: [#(crate::i18n::tr("Automatic (default)")), #(crate::i18n::tr("Force wide (desktop)")), #(crate::i18n::tr("Force narrow (mobile)"))] i18n_labels: ["Automatic (default)", "Force wide (desktop)", "Force narrow (mobile)"]
                 selected_item: 0
             }
         }
         mod.widgets.SettingsSectionDescription {
-            body: "<ul><li>By default, the app layout auto-adapts based on width.</li></ul>"
+            body: #(crate::i18n::tr("<ul><li>By default, the app layout auto-adapts based on width.</li></ul>")) i18n_body: "<ul><li>By default, the app layout auto-adapts based on width.</li></ul>"
         }
 
 
@@ -269,7 +277,7 @@ script_mod! {
             SubsectionLabel {
                 width: Fit,
                 margin: Inset{top: 4, right: 4}
-                text: "UI Zoom Level:"
+                text: #(crate::i18n::tr("UI Zoom Level:")) i18n_text: "UI Zoom Level:"
             }
 
             ui_zoom_controls := View {
@@ -317,7 +325,7 @@ script_mod! {
 
 
         SubsectionLabel {
-            text: "Keyboard Shortcut to Send Message"
+            text: #(crate::i18n::tr("Keyboard Shortcut to Send Message")) i18n_text: "Keyboard Shortcut to Send Message"
         }
 
         send_on_cmd_enter_toggle := ToggleFlat {
@@ -332,16 +340,16 @@ script_mod! {
         }
 
         send_shortcut_description := mod.widgets.SettingsSectionDescription {
-            body: "<ul><li>Current setting: 'Enter' to send, 'Shift + Enter' for a new line</li></ul>"
+            body: #(crate::i18n::tr("<ul><li>Current setting: 'Enter' to send, 'Shift + Enter' for a new line</li></ul>")) i18n_body: "<ul><li>Current setting: 'Enter' to send, 'Shift + Enter' for a new line</li></ul>"
         }
 
         send_shortcut_soft_keyboard_warning := mod.widgets.SettingsSectionDescription {
             font_color: (COLOR_TEXT_WARNING_NOT_FOUND)
-            body: "<ul><li>Note: this only applies to physical (hardware) keyboards.</li></ul>"
+            body: #(crate::i18n::tr("<ul><li>Note: this only applies to physical (hardware) keyboards.</li></ul>")) i18n_body: "<ul><li>Note: this only applies to physical (hardware) keyboards.</li></ul>"
         }
 
         SubsectionLabel {
-            text: "Maximum Height of Thumbnails"
+            text: #(crate::i18n::tr("Maximum Height of Thumbnails")) i18n_text: "Maximum Height of Thumbnails"
         }
 
         View {
@@ -351,15 +359,15 @@ script_mod! {
             spacing: 4,
 
             thumb_small_radio := mod.widgets.RobrixSettingsRadioButton {
-                text: "Small (200 pixels)"
+                text: #(crate::i18n::tr("Small (200 pixels)")) i18n_text: "Small (200 pixels)"
             }
 
             thumb_medium_radio := mod.widgets.RobrixSettingsRadioButton {
-                text: "Medium (300 pixels, default)"
+                text: #(crate::i18n::tr("Medium (300 pixels, default)")) i18n_text: "Medium (300 pixels, default)"
             }
 
             thumb_large_radio := mod.widgets.RobrixSettingsRadioButton {
-                text: "Large (400 pixels)"
+                text: #(crate::i18n::tr("Large (400 pixels)")) i18n_text: "Large (400 pixels)"
             }
 
             View {
@@ -369,7 +377,7 @@ script_mod! {
                 spacing: 6,
 
                 thumb_custom_radio := mod.widgets.RobrixSettingsRadioButton {
-                    text: "Custom:"
+                    text: #(crate::i18n::tr("Custom:")) i18n_text: "Custom:"
                 }
 
                 // Read-only by default, enabled when `thumb_custom_radio` is selected.
@@ -388,13 +396,13 @@ script_mod! {
                         color: (MESSAGE_TEXT_COLOR),
                         text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
                     }
-                    text: "pixels"
+                    text: #(crate::i18n::tr("pixels")) i18n_text: "pixels"
                 }
             }
         }
 
         SubsectionLabel {
-            text: "Read Receipts"
+            text: #(crate::i18n::tr("Read Receipts")) i18n_text: "Read Receipts"
         }
 
         View {
@@ -407,7 +415,7 @@ script_mod! {
                 padding: Inset { left: 15}
                 active: true,
                 draw_bg +: { size: 21 }
-                text: "Show who has seen/read a message"
+                text: #(crate::i18n::tr("Show who has seen/read a message")) i18n_text: "Show who has seen/read a message"
                 draw_text +: {
                     text_style: mod.widgets.SETTINGS_BOLD_TEXT_STYLE {},
                 }
@@ -424,11 +432,11 @@ script_mod! {
 
                 mod.widgets.SettingsItemLabel {
                     width: 155,
-                    text: "Send read receipts to:"
+                    text: #(crate::i18n::tr("Send read receipts to:")) i18n_text: "Send read receipts to:"
                 }
 
                 read_receipts_privacy_dropdown := mod.widgets.RobrixSettingsDropDown {
-                    labels: ["Everyone (default)", "Only my own devices"]
+                    labels: [#(crate::i18n::tr("Everyone (default)")), #(crate::i18n::tr("Only my own devices"))] i18n_labels: ["Everyone (default)", "Only my own devices"]
                     selected_item: 0
                 }
             }
@@ -444,12 +452,12 @@ script_mod! {
 
                 mod.widgets.SettingsItemLabel {
                     width: 155,
-                    text: "Mark a room as read:"
+                    text: #(crate::i18n::tr("Mark a room as read:")) i18n_text: "Mark a room as read:"
                 }
 
                 mark_as_read_dropdown := mod.widgets.RobrixSettingsDropDown {
                     width: 240,
-                    labels: ["When viewing messages", "Only manually"]
+                    labels: [#(crate::i18n::tr("When viewing messages")), #(crate::i18n::tr("Only manually"))] i18n_labels: ["When viewing messages", "Only manually"]
                     selected_item: 0
                 }
             }
@@ -508,12 +516,18 @@ impl Widget for AppSettings {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        self.view.drop_down(cx, ids!(language_dropdown)).set_selected_item(cx, crate::i18n::language().index());
         self.view.draw_walk(cx, scope, walk)
     }
 }
 
 impl AppSettings {
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions, scope: &mut Scope) {
+        if let Some(index) = self.view.drop_down(cx, ids!(language_dropdown)).changed(actions) {
+            if let Err(error) = crate::i18n::set_language(cx, crate::i18n::Language::from_index(index)) {
+                enqueue_popup_notification(crate::i18n::format("Could not save language: {error}", &[("error", error.to_string())]), PopupKind::Error, Some(5.0));
+            }
+        }
         let app_state = scope.data.get_mut::<AppState>().unwrap();
 
         let view_mode_dropdown = self.view.drop_down(cx, ids!(view_mode_dropdown));
@@ -791,10 +805,10 @@ impl AppSettings {
         view.text_input(cx, ids!(ui_zoom_input))
             .set_text(cx, &prefs.ui_zoom.format_percent());
         view.html(cx, ids!(ui_zoom_description))
-            .set_text(cx, UI_ZOOM_DESCRIPTION);
+            .set_text(cx, crate::i18n::tr(UI_ZOOM_DESCRIPTION));
 
         view.check_box(cx, ids!(send_on_cmd_enter_toggle))
-            .set_text(SEND_SHORTCUT_TOGGLE_LABEL);
+            .set_text(crate::i18n::tr(SEND_SHORTCUT_TOGGLE_LABEL));
         Self::update_send_shortcut_description(cx, view, prefs.send_on_enter);
 
         // The send shortcut only applies to a physical keyboard, so the
@@ -812,7 +826,7 @@ impl AppSettings {
         } else {
             SHOW_READ_RECEIPTS_DESC_HIDDEN
         };
-        view.html(cx, ids!(show_read_receipts_description)).set_text(cx, text);
+        view.html(cx, ids!(show_read_receipts_description)).set_text(cx, crate::i18n::tr(text));
     }
 
     fn update_read_receipts_privacy_description(cx: &mut Cx, view: &View, privacy: ReadReceiptsPrivacy) {
@@ -820,7 +834,7 @@ impl AppSettings {
             ReadReceiptsPrivacy::Everyone => READ_RECEIPTS_PRIVACY_DESC_EVERYONE,
             ReadReceiptsPrivacy::OnlyMyDevices => READ_RECEIPTS_PRIVACY_DESC_OWN_DEVICES,
         };
-        view.html(cx, ids!(read_receipts_privacy_description)).set_text(cx, text);
+        view.html(cx, ids!(read_receipts_privacy_description)).set_text(cx, crate::i18n::tr(text));
     }
 
     fn update_mark_as_read_description(cx: &mut Cx, view: &View, behavior: MarkAsReadBehavior) {
@@ -828,7 +842,7 @@ impl AppSettings {
             MarkAsReadBehavior::WhenViewingMessages => MARK_AS_READ_DESC_VIEWING,
             MarkAsReadBehavior::Manual => MARK_AS_READ_DESC_MANUAL,
         };
-        view.html(cx, ids!(mark_as_read_description)).set_text(cx, text);
+        view.html(cx, ids!(mark_as_read_description)).set_text(cx, crate::i18n::tr(text));
     }
 
     fn update_send_shortcut_description(cx: &mut Cx, view: &View, send_on_enter: bool) {
@@ -837,7 +851,7 @@ impl AppSettings {
         } else {
             SEND_SHORTCUT_DESC_CMD
         };
-        view.html(cx, ids!(send_shortcut_description)).set_text(cx, text);
+        view.html(cx, ids!(send_shortcut_description)).set_text(cx, crate::i18n::tr(text));
     }
 
     /// Sets `is_read_only` based on whether the custom radio is selected.

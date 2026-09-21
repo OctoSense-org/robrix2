@@ -176,7 +176,7 @@ script_mod! {
 
                 image_viewer_status_label := Label {
                     width: Fit, height: 30,
-                    text: "Loading image...",
+                    text: #(crate::i18n::tr("Loading image...")) i18n_text: "Loading image...",
                     draw_text +: {
                         text_style: REGULAR_TEXT {font_size: 14},
                         color: (COLOR_TEXT)
@@ -1055,7 +1055,7 @@ impl ImageViewer {
         footer.view(cx, ids!(image_viewer_loading_spinner_view))
             .set_visible(cx, true);
         footer.label(cx, ids!(image_viewer_status_label))
-            .set_text(cx, "Loading...");
+            .set_text(cx, crate::i18n::tr("Loading..."));
         footer.view(cx, ids!(image_viewer_forbidden_view))
             .set_visible(cx, false);
         footer.set_visible(cx, true);

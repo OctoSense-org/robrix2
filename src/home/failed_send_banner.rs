@@ -58,14 +58,14 @@ script_mod! {
                 padding: 10,
                 draw_icon.svg: (ICON_SEND)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -1, right: -1}}
-                text: "Retry"
+                text: #(crate::i18n::tr("Retry")) i18n_text: "Retry"
             }
 
             cancel_send_button := RobrixNegativeIconButton {
                 padding: 10,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -1, right: -1, top: -1}}
-                text: "Cancel Send"
+                text: #(crate::i18n::tr("Cancel Send")) i18n_text: "Cancel Send"
             }
         }
     }
@@ -103,7 +103,7 @@ impl Widget for FailedSendBanner {
                 let content = ConfirmationModalContent {
                     title_text: "Cancel sending this message?".into(),
                     body_text: "It won't be sent, and what you wrote will be discarded.".into(),
-                    accept_button_text: Some("Cancel Send".into()),
+                    accept_button_text: Some(crate::i18n::tr("Cancel Send").into()),
                     cancel_button_text: Some("Keep It".into()),
                     on_accept_clicked: Some(Box::new(move |_cx| {
                         submit_async_request(MatrixRequest::RedactMessage {

@@ -159,7 +159,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_FORBIDDEN)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Reject Invite"
+                text: #(crate::i18n::tr("Reject Invite")) i18n_text: "Reject Invite"
             }
 
             accept_button := RobrixPositiveIconButton {
@@ -167,7 +167,7 @@ script_mod! {
                 padding: 15,
                 draw_icon.svg: (ICON_CHECKMARK)
                 icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-                text: "Join Room"
+                text: #(crate::i18n::tr("Join Room")) i18n_text: "Join Room"
             }
         }
 
@@ -179,7 +179,7 @@ script_mod! {
             padding: 15,
             draw_icon.svg: (ICON_FORBIDDEN)
             icon_walk: Walk{width: 16, height: 16, margin: Inset{left: -2, right: -1} }
-            text: "Reject & Block Sender"
+            text: #(crate::i18n::tr("Reject & Block Sender")) i18n_text: "Reject & Block Sender"
         }
 
         completion_label := Label {
@@ -514,20 +514,20 @@ impl Widget for InviteScreen {
             cx,
             info.inviter.as_ref().is_some_and(|i| !is_user_blocked(&i.user_id)),
         );
-        let join_text = match self.is_space { true => "Join Space", false => "Join Room" };
+        let join_text = match self.is_space { true => "Join Space", false => crate::i18n::tr("Join Room") };
         match self.invite_state {
             InviteState::WaitingOnUserInput => {
                 cancel_button.set_enabled(cx, true);
                 accept_button.set_enabled(cx, true);
                 reject_and_block_button.set_enabled(cx, true);
-                cancel_button.set_text(cx, "Reject Invite");
+                cancel_button.set_text(cx, crate::i18n::tr("Reject Invite"));
                 accept_button.set_text(cx, join_text);
             }
             InviteState::WaitingForJoinResult => {
                 cancel_button.set_enabled(cx, false);
                 accept_button.set_enabled(cx, false);
                 reject_and_block_button.set_enabled(cx, false);
-                cancel_button.set_text(cx, "Reject Invite");
+                cancel_button.set_text(cx, crate::i18n::tr("Reject Invite"));
                 accept_button.set_text(cx, "Joining...");
             }
             InviteState::WaitingForLeaveResult => {
@@ -541,7 +541,7 @@ impl Widget for InviteScreen {
                 cancel_button.set_enabled(cx, false);
                 accept_button.set_enabled(cx, false);
                 reject_and_block_button.set_enabled(cx, false);
-                cancel_button.set_text(cx, "Reject Invite");
+                cancel_button.set_text(cx, crate::i18n::tr("Reject Invite"));
                 accept_button.set_text(cx, "Joined!");
             }
             InviteState::RoomLeft => {

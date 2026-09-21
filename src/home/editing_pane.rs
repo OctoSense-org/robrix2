@@ -56,7 +56,7 @@ script_mod! {
                     text_style: USERNAME_TEXT_STYLE {},
                     color: #222,
                 }
-                text: "Editing:"
+                text: #(crate::i18n::tr("Editing:")) i18n_text: "Editing:"
             }
 
             cancel_button := RobrixNegativeIconButton {
@@ -158,6 +158,8 @@ pub struct EditingPane {
 
     #[rust] info: Option<EditingPaneInfo>,
     #[rust] is_animating_out: bool,
+    /// A newly opened input has no hit-test area until its first draw.
+    #[rust] focus_after_draw: bool,
     #[rust] last_content_height: f64,
     /// Used to force this widget's parent to do a re-draw
     /// after the hide animation completes on this pane.
@@ -216,6 +218,7 @@ impl Widget for EditingPane {
                 self.visible = false;
                 self.is_animating_out = false;
                 self.info = None;
+                self.focus_after_draw = false;
                 cx.widget_action(self.widget_uid(), EditingPaneAction::Hidden);
                 cx.revert_key_focus();
                 self.redraw(cx);
@@ -458,6 +461,13 @@ impl Widget for EditingPane {
         if ec_height > 0.0 {
             self.last_content_height = ec_height;
         }
+        if step.is_done() && self.visible && !self.is_animating_out && self.focus_after_draw {
+            let input = self.mentionable_text_input(cx, ids!(editing_content.edit_text_input)).text_input_ref();
+            if !input.area().is_empty() {
+                input.set_key_focus(cx);
+                self.focus_after_draw = false;
+            }
+        }
 
         step
     }
@@ -552,9 +562,8 @@ impl EditingPane {
             Cursor { index: text_len, prefer_next_row: false },
             false,
         );
-        // TODO: this doesn't work, likely because of Makepad's bug in which you cannot
-        // give key focus to a widget that hasn't been drawn yet (as it has no Area).
-        inner_text_input.set_key_focus(cx);
+        // Request focus only once the first draw has created the input's area.
+        self.focus_after_draw = true;
         self.redraw(cx); 
     }
 
@@ -584,6 +593,7 @@ impl EditingPane {
         });
         self.visible = true;
         self.is_animating_out = false;
+        self.focus_after_draw = false;
         self.button(cx, ids!(accept_button)).reset_hover(cx);
         self.button(cx, ids!(cancel_button)).reset_hover(cx);
         self.animator_play(cx, ids!(panel.show));

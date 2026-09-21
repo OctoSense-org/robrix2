@@ -41,11 +41,11 @@ impl AgentReplyKind {
 
     /// Short badge text for this kind.
     pub fn label(self) -> &'static str {
-        match self {
+        crate::i18n::tr(match self {
             Self::Request => "request",
             Self::Reply => "reply",
             Self::Inform => "info",
-        }
+        })
     }
 }
 
@@ -130,7 +130,7 @@ impl AgentMessagePresentation {
     /// The text of the badge shown next to the sender's name, e.g.
     /// `coordinator · request`, `reviewer`, or just `agent`.
     pub fn badge_text(&self) -> String {
-        let role = self.role.map(AgentRole::label).unwrap_or("agent");
+        let role = self.role.map(AgentRole::label).unwrap_or(crate::i18n::tr("agent"));
         match self.kind {
             Some(kind) => format!("{role} · {}", kind.label()),
             None => role.to_owned(),

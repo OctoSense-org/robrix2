@@ -33,6 +33,8 @@ pub mod agents;
 pub mod approval;
 pub mod approval_card;
 pub mod preferences;
+pub mod ops;
+pub mod reply;
 pub mod presentation;
 pub mod workflow;
 
@@ -80,6 +82,8 @@ pub enum ApprovalVerdictResult {
 pub fn script_mod(vm: &mut ScriptVm) {
     approval_card::script_mod(vm);
     preferences::script_mod(vm);
+    reply::script_mod(vm);
+    ops::ui::script_mod(vm);
 }
 
 #[cfg(test)]

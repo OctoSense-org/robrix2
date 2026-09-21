@@ -9,19 +9,8 @@
 //! [`NavigationBarButton`](crate::shared::navigation_bar_button::NavigationBarButton)
 //! base widget, which provides hover and "selected" background animations.
 //!
-//! Their order in Mobile view (horizontally from left to right) is:
-//! 1. Home (house icon): the main view that shows all rooms across all spaces.
-//! 2. Add Room (plus sign icon): a separate view that allows adding (joining) existing rooms,
-//!    exploring public rooms, or creating new rooms/spaces.
-//! 3. Spaces: a button that toggles the `SpacesBar` (shows/hides it).
-//!    * This is NOT a regular radio button, it's a separate toggle.
-//!    * This is only shown in Mobile view mode, because the `SpacesBar` is always shown
-//!      within the NavigationTabBar itself in Desktop view mode.
-//! 4. Profile/Settings (user profile avatar): the `ProfileIcon` with a
-//!    verification badge. This single button serves as both the user-avatar
-//!    indicator and the entry point to the SettingsScreen.
-//!    * Upon click, this shows the SettingsScreen as normal, and is visually
-//!      marked as the selected tab.
+//! Mobile uses four persistent roots: Chats, Contacts, Discover, and Me.
+//! Room navigation pushes above these roots and preserves the selected tab.
 //!
 //! The order in Desktop view (vertically from top to bottom) is:
 //! 1. Profile/Settings
@@ -221,6 +210,7 @@ script_mod! {
     mod.widgets.AddRoomButton = mod.widgets.NavigationTabButton {
         tooltip_text: "Add/Join Room"
         icon +: {
+            icon_walk: Walk{width: 20 height: 20}
             draw_icon +: { svg: (ICON_ADD) }
         }
     }
@@ -251,6 +241,19 @@ script_mod! {
         draw_bg.color: (RBX_NAV_DIVIDER)
     }
 
+    mod.widgets.MobileTabButton = NavigationBarButton {
+        width: Fill height: 56 flow: Down spacing: 4
+        padding: Inset{top: 7 bottom: 4} align: Align{x: 0.5 y: 0.5}
+        draw_bg +: {color_hover: #x00000000 color_active: #x00000000 border_radius: 0}
+        icon := Icon {
+            icon_walk: Walk{width: 24 height: 24}
+            draw_icon.color: #x191919
+        }
+        label := Label {
+            draw_text +: {color: #x191919 text_style: theme.font_regular {font_size: 8}}
+        }
+    }
+
     mod.widgets.NavigationTabBar = #(NavigationTabBar::register_widget(vm)) {
         // Dark navy anchor rail (robrix2 visual spec §2/§5.6). SolidView fills its
         // column edge-to-edge (no rounded-SDF anti-aliased border), so the navy is
@@ -276,6 +279,10 @@ script_mod! {
             CachedWidget {
                 home_button := mod.widgets.HomeButton {}
             }
+            moments_button := mod.widgets.NavigationTabButton {
+                tooltip_text: "Moments"
+                icon.draw_icon.svg: ICON_GLOBE
+            }
             CachedWidget {
                 add_room_button := mod.widgets.AddRoomButton {}
             }
@@ -295,39 +302,18 @@ script_mod! {
             }
         }
 
-        // The mobile bottom bar shares the desktop rail's navy palette so the
-        // same nav-button templates (transparent idle, navy pill, white icon
-        // when selected) read correctly on both.
         Mobile := SolidView {
-            new_batch: true,
-            flow: Right
-            align: Align{x: 0.5, y: 0.5}
-            width: Fill,
-            // On mobile, the nav bar is at the bottom, so we let it fill the entire space
-            // *including* drawing within the safe inset areas,
-            // and the bottom-pad its content so the buttons aren't drawn in the safe areas.
-            height: (mod.widgets.NAVIGATION_TAB_BAR_SIZE + mod.widgets.SAFE_INSET_PAD_BOTTOM),
-            padding: Inset{
-                bottom: (mod.widgets.SAFE_INSET_PAD_BOTTOM),
-                left: (mod.widgets.SAFE_INSET_PAD_LEFT),
-                right: (mod.widgets.SAFE_INSET_PAD_RIGHT),
+            new_batch: true flow: Right align: Align{y: 0.5}
+            width: Fill height: (56 + mod.widgets.SAFE_INSET_PAD_BOTTOM)
+            padding: Inset{bottom: (mod.widgets.SAFE_INSET_PAD_BOTTOM)}
+            draw_bg.color: #xf7f7f7
+            chats_tab := mod.widgets.MobileTabButton {
+                icon.draw_icon.svg: crate_resource("self://resources/icons/double_chat.svg")
+                label.text: #(crate::i18n::tr("Chats")) label.i18n_text: "Chats"
             }
-
-            show_bg: true
-            draw_bg.color: (RBX_NAV_BG)
-
-            CachedWidget {
-                home_button := mod.widgets.HomeButton {}
-            }
-            CachedWidget {
-                add_room_button := mod.widgets.AddRoomButton {}
-            }
-
-            toggle_spaces_bar_button := mod.widgets.ToggleSpacesBarButton {}
-
-            CachedWidget {
-                profile_icon := mod.widgets.ProfileIcon {}
-            }
+            contacts_tab := mod.widgets.MobileTabButton {icon.draw_icon.svg: ICON_PEOPLE label.text: #(crate::i18n::tr("Contacts")) label.i18n_text: "Contacts"}
+            discover_tab := mod.widgets.MobileTabButton {icon.draw_icon.svg: ICON_GLOBE label.text: #(crate::i18n::tr("Discover")) label.i18n_text: "Discover"}
+            me_tab := mod.widgets.MobileTabButton {icon.draw_icon.svg: crate_resource("self://resources/icons/person.svg") label.text: #(crate::i18n::tr("Me")) label.i18n_text: "Me"}
         }
     }
 }
@@ -470,7 +456,7 @@ impl Widget for ProfileIcon {
                     .tooltip_content();
                 let text = self.own_profile.as_ref().map_or_else(
                     || String::from("Not logged in (or disconnected).\n\nClick/tap to access all settings."),
-                    |p| format!("Logged in {verification_str}as \"{}\".\n\nClick/tap to access all settings.", p.displayable_name()),
+                    |p| crate::i18n::format("Logged in {verification_str}as \"{0}\".\n\nClick/tap to access all settings.", &[("verification_str", (verification_str).to_string()), ("0", (p.displayable_name()).to_string())]),
                 );
                 let mut options = CalloutTooltipOptions {
                     position: if effective_is_desktop(cx) { TooltipPosition::Right } else { TooltipPosition::Top },
@@ -554,6 +540,7 @@ pub struct NavigationTabBar {
 
     /// The tab currently visually marked as selected.
     #[rust] selected_tab: SelectedTab,
+    #[rust] mobile_palette: Option<(WidgetUid, SelectedTab)>,
 }
 
 impl ScriptHook for NavigationTabBar {
@@ -565,6 +552,7 @@ impl ScriptHook for NavigationTabBar {
 
     fn on_after_reload(&mut self, vm: &mut ScriptVm) {
         vm.with_cx_mut(|cx| {
+            self.mobile_palette = None;
             self.apply_selected_tab(cx, None);
         });
     }
@@ -590,28 +578,28 @@ impl NavigationTabBar {
         let home    = self.view.navigation_bar_button(cx, ids!(home_button));
         let add     = self.view.navigation_bar_button(cx, ids!(add_room_button));
         let profile = self.view.profile_icon(cx, ids!(profile_icon));
-        match &self.selected_tab {
-            SelectedTab::Home => {
-                home.set_selected(cx, true);
-                add.set_selected(cx, false);
-                profile.set_selected(cx, false);
-            }
-            SelectedTab::AddRoom => {
-                home.set_selected(cx, false);
-                add.set_selected(cx, true);
-                profile.set_selected(cx, false);
-            }
-            SelectedTab::Settings => {
-                home.set_selected(cx, false);
-                add.set_selected(cx, false);
-                profile.set_selected(cx, true);
-            }
-            SelectedTab::Space { .. } => {
-                home.set_selected(cx, false);
-                add.set_selected(cx, false);
-                profile.set_selected(cx, false);
+        home.set_selected(cx, self.selected_tab == SelectedTab::Home);
+        add.set_selected(cx, self.selected_tab == SelectedTab::AddRoom);
+        profile.set_selected(cx, matches!(self.selected_tab, SelectedTab::Settings | SelectedTab::Me));
+        let chats_uid = self.view.navigation_bar_button(cx, ids!(chats_tab)).widget_uid();
+        let palette = (chats_uid, self.selected_tab.clone());
+        let update_palette = self.mobile_palette.as_ref() != Some(&palette);
+        for (id, selected) in [
+            (ids!(chats_tab), matches!(self.selected_tab, SelectedTab::Home | SelectedTab::Space {..})),
+            (ids!(contacts_tab), self.selected_tab == SelectedTab::Contacts),
+            (ids!(discover_tab), matches!(self.selected_tab, SelectedTab::Discover | SelectedTab::AddRoom)),
+            (ids!(me_tab), matches!(self.selected_tab, SelectedTab::Me | SelectedTab::Settings)),
+        ] {
+            let button = self.view.navigation_bar_button(cx, id);
+            button.set_selected(cx, selected);
+            if update_palette && !button.is_empty() {
+                let color = if selected { vec4(0.027, 0.757, 0.376, 1.0) } else { vec4(0.098, 0.098, 0.098, 1.0) };
+                let mut icon = self.view.icon(cx, &[id[0], id!(icon)]);
+                script_apply_eval!(cx, icon, {draw_icon +: {color: #(color)}});
+                self.view.label(cx, &[id[0], id!(label)]).set_text_color(cx, color);
             }
         }
+        self.mobile_palette = Some(palette);
     }
 }
 
@@ -620,6 +608,16 @@ impl Widget for NavigationTabBar {
         self.view.handle_event(cx, event, scope);
 
         if let Event::Actions(actions) = event {
+            for (id, tab) in [
+                (ids!(chats_tab), SelectedTab::Home),
+                (ids!(contacts_tab), SelectedTab::Contacts),
+                (ids!(discover_tab), SelectedTab::Discover),
+                (ids!(me_tab), SelectedTab::Me),
+            ] {
+                if self.view.navigation_bar_button(cx, id).clicked(actions) {
+                    cx.action(NavigationBarAction::GoToTab(tab));
+                }
+            }
             // Handle clicks on each of the navigation tab buttons.
             // Each click both updates the visual selection and emits the
             // corresponding `NavigationBarAction` for downstream handling.
@@ -655,6 +653,9 @@ impl Widget for NavigationTabBar {
                 });
             }
 
+            if self.view.navigation_bar_button(cx, ids!(moments_button)).clicked(actions) {
+                cx.action(crate::moments::ui::MomentsAction::Open {author: None});
+            }
             if self.view.navigation_bar_button(cx, ids!(toggle_spaces_bar_button)).clicked(actions) {
                 self.is_spaces_bar_shown = !self.is_spaces_bar_shown;
                 cx.action(NavigationBarAction::ToggleSpacesBar);
@@ -687,7 +688,16 @@ impl Widget for NavigationTabBar {
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
-        self.view.draw_walk(cx, scope, walk)
+        if let Some(state) = scope.data.get::<crate::app::AppState>() {
+            self.selected_tab = state.selected_tab.clone();
+        }
+        self.apply_selected_tab(cx, None);
+        let step = self.view.draw_walk(cx, scope, walk);
+        // AdaptiveView creates its variant during draw. Apply again after that
+        // first draw so a new mobile bar doesn't remain visually unselected
+        // until a tap or an unrelated sync signal arrives.
+        self.apply_selected_tab(cx, None);
+        step
     }
 }
 
@@ -697,6 +707,9 @@ impl Widget for NavigationTabBar {
 pub enum SelectedTab {
     #[default]
     Home,
+    Contacts,
+    Discover,
+    Me,
     AddRoom,
     Settings,
     // AlertsInbox,
@@ -749,12 +762,18 @@ impl SelectedTab {
 ///    * This only includes the `ToggleSpacesBar` variant.
 #[derive(Debug, PartialEq, Eq)]
 pub enum NavigationBarAction {
+    /// Select a top-level root while keeping its page state.
+    GoToTab(SelectedTab),
     /// Go to the main rooms content view.
     GoToHome,
     /// Go the add/join/explore room view.
     GoToAddRoom,
+    /// Leave Explore Rooms and restore the tab that opened it.
+    CloseAddRoom,
     /// Go to the Settings view (open the `SettingsScreen`).
     OpenSettings,
+    /// Open the current user's mobile Personal Information page.
+    OpenOwnProfile,
     /// Close the Settings view (`SettingsScreen`), returning to the previous view.
     CloseSettings,
     /// Go the space screen for the given space.

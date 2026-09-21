@@ -44,7 +44,7 @@ script_mod! {
                 align: Align{x: 0.5, y: 0.0}
 
                 title := Label {
-                    text: "Loading content..."
+                    text: #(crate::i18n::tr("Loading content...")) i18n_text: "Loading content..."
                     draw_text +: {
                         text_style: TITLE_TEXT {font_size: 13},
                         color: #000
@@ -80,7 +80,7 @@ script_mod! {
                         align: Align{x: 0.5, y: 0.5}
                         padding: 15
                         icon_walk: Walk{width: 0, height: 0 }
-                        text: "Cancel"
+                        text: #(crate::i18n::tr("Cancel")) i18n_text: "Cancel"
                     }
                 }
             }

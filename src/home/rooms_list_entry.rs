@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use makepad_widgets::*;
+use makepad_widgets::event::TouchState;
 use matrix_sdk::ruma::{OwnedRoomId, RoomId};
 
 use crate::{
@@ -15,6 +16,7 @@ use crate::{
 };
 
 use super::rooms_list::{InvitedRoomInfo, InviterInfo, JoinedRoomInfo};
+use super::back_swipe::BackSwipe;
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
@@ -46,7 +48,7 @@ script_mod! {
             color: (RBX_FG_PRIMARY),
             text_style: RBX_TEXT_BODY_STRONG {}
         }
-        text: "[Room name unknown]"
+        text: #(crate::i18n::tr("[Room name unknown]"))
     }
 
     mod.widgets.RoomsListEntryTimestamp = Label {
@@ -109,7 +111,7 @@ script_mod! {
                         color: (RBX_FG_SECONDARY),
                         text_style: REGULAR_TEXT { font_size: 9.3, line_spacing: 1.32 },
                     }
-                    text: "[No recent messages]"
+                    text: #(crate::i18n::tr("[No recent messages]"))
                 }
             }
         }
@@ -195,6 +197,95 @@ script_mod! {
                 }
             }
         }
+    }
+
+    mod.widgets.MobileRoomsListEntry = mod.widgets.RoomsListEntryContent {
+        mobile: true
+        height: 72 padding: 0 spacing: 0 flow: Overlay clip_x: true
+        draw_bg +: {
+            border_radius: 0
+            color: #xffffff color_hover: #xe5e5e5 color_selected: #xffffff
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.rect(0.0, 0.0, self.rect_size.x, self.rect_size.y)
+                sdf.fill(self.get_color())
+                sdf.rect(76.0, self.rect_size.y - 0.5, self.rect_size.x - 76.0, 0.5)
+                sdf.fill(#xe5e5e5)
+                return sdf.result
+            }
+        }
+        swipe_actions := View {
+            visible: false width: Fill height: Fill flow: Right
+            View {width: Fill height: Fill}
+            swipe_unread := RobrixNeutralIconButton {
+                width: 88 height: Fill padding: 4 spacing: 0 align: Align{x: 0.5 y: 0.5}
+                text: #(crate::i18n::tr("Unread")) i18n_text: "Unread" icon_walk: Walk{width: 0 height: 0}
+                draw_bg +: {pixel: fn() {return #x576b95.mix(#x405377, self.down)}}
+                draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style.font_size: 10}
+            }
+            swipe_hide := RobrixNeutralIconButton {
+                width: 64 height: Fill padding: 4 spacing: 0 align: Align{x: 0.5 y: 0.5}
+                text: #(crate::i18n::tr("Hide")) i18n_text: "Hide" icon_walk: Walk{width: 0 height: 0}
+                draw_bg +: {pixel: fn() {return #xfa9d3b.mix(#xd88830, self.down)}}
+                draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style.font_size: 10}
+            }
+            swipe_delete := RobrixNeutralIconButton {
+                width: 72 height: Fill padding: 4 spacing: 0 align: Align{x: 0.5 y: 0.5}
+                text: #(crate::i18n::tr("Delete")) i18n_text: "Delete" icon_walk: Walk{width: 0 height: 0}
+                draw_bg +: {pixel: fn() {return #xfa5151.mix(#xd84040, self.down)}}
+                draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style.font_size: 10}
+            }
+        }
+        chat_row := SolidView {
+            width: Fill height: Fill flow: Right spacing: 12
+            padding: Inset{left: 16 right: 16 top: 12 bottom: 12}
+            draw_bg +: {pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.rect(0.0, 0.0, self.rect_size.x, self.rect_size.y)
+                sdf.fill(#xffffff)
+                sdf.rect(76.0, self.rect_size.y - 0.5, self.rect_size.x - 76.0, 0.5)
+                sdf.fill(#xe5e5e5)
+                return sdf.result
+            }}
+        View {
+            width: 48 height: 48 flow: Overlay clip_x: false clip_y: false
+            avatar := MobileAvatar {}
+            View {
+                width: Fill height: Fill align: Align{x: 1.0 y: 0.0}
+                margin: Inset{top: -5 right: -6}
+                mobile_badge := RoundedView {
+                    visible: false width: Fit height: 18 padding: Inset{left: 5 right: 5}
+                    align: Align{x: 0.5 y: 0.5}
+                    draw_bg +: {color: #xfa5151 border_radius: 9}
+                    count := Label {padding: 0 draw_text +: {color: #xffffff text_style: theme.font_regular {font_size: 9}}}
+                }
+            }
+        }
+        View {
+            width: Fill height: Fill flow: Down spacing: 6 padding: Inset{top: 2}
+            View {
+                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                room_name := mod.widgets.RoomName {draw_text.text_style: theme.font_regular {font_size: 12.5}}
+                timestamp := mod.widgets.RoomsListEntryTimestamp {draw_text.text_style.font_size: 8.5}
+            }
+            View {
+                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                mod.widgets.MessagePreview {
+                    latest_message +: {
+                        html_view +: {html +: {max_lines: 1 font_size: 10}}
+                        plaintext_view +: {pt_label +: {max_lines: 1 draw_text +: {text_style +: {font_size: 10}}}}
+                    }
+                }
+                muted_indicator := View {
+                    visible: false width: 16 height: 16
+                    Icon {
+                        icon_walk: Walk{width: 16 height: 16}
+                        draw_icon +: {svg: crate_resource("self://resources/icons/bell_off.svg") color: #xb2b2b2}
+                    }
+                }
+            }
+        }        }
+
     }
 
     mod.widgets.RoomsListEntry = #(RoomsListEntry::register_widget(vm)) {
@@ -320,12 +411,19 @@ pub struct RoomsListEntryContent {
     #[deref] view: View,
     #[apply_default] animator: Animator,
 
+    #[live] mobile: bool,
+
     #[rust] room_id: Option<OwnedRoomId>,
 
     /// `true` while a context menu that we opened is being shown.
     #[rust] is_context_menu_open: bool,
     /// Whether this entry currently shows an invited (not joined) room.
     #[rust] is_invited: bool,
+    #[rust] swipe_open: bool,
+    #[rust] swipe_dragged: bool,
+    #[rust] left_swipe: BackSwipe,
+    #[rust] latest_timestamp: u64,
+    #[rust] has_unreads: bool,
 
     /// The preview colors that were last drawn for this entry.
     /// * Some(true): this entry was last drawn as selected.
@@ -341,6 +439,62 @@ impl Widget for RoomsListEntryContent {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         if self.animator_handle_event(cx, event).must_redraw() {
             self.redraw(cx);
+        }
+        if self.mobile && !self.is_invited {
+            if let Event::Actions(actions) = event {
+                if actions.iter().any(|a| a.downcast_ref::<super::chat_actions::ChatSwipeOpened>()
+                    .is_some_and(|opened| self.room_id.as_ref() != Some(&opened.0))) {
+                    self.set_swipe_open(cx, false);
+                }
+            }
+            if let Event::Scroll(scroll) = event {
+                if self.view.area().rect(cx).contains(scroll.abs) {
+                    if self.left_swipe.update_left(scroll) { self.set_swipe_open(cx, true); }
+                }
+            }
+            if self.swipe_open {
+                let generated = cx.capture_actions(|cx| self.view.handle_event(cx, event, scope));
+                // Complete the capture that began on the row before it slid.
+                // Otherwise the release never reaches that area and subsequent
+                // taps cannot be captured by the revealed action buttons.
+                if let Hit::FingerUp(_) = event.hits(cx, self.view.area()) {
+                    self.swipe_dragged = false;
+                }
+                {
+                    let actions = if let Event::Actions(actions) = event { actions } else { &generated };
+                    if let Some(room_id) = self.room_id.clone() {
+                        if self.button(cx, ids!(swipe_unread)).clicked(actions) {
+                            use crate::sliding_sync::{submit_async_request, MatrixRequest};
+                            if self.has_unreads {
+                                submit_async_request(MatrixRequest::MarkRoomAsRead { room_id, receipt_type: crate::settings::app_preferences::preferred_receipt_type() });
+                            } else {
+                                submit_async_request(MatrixRequest::SetUnreadFlag { room_id, mark_as_unread: true });
+                            }
+                            self.set_swipe_open(cx, false);
+                        } else if self.button(cx, ids!(swipe_hide)).clicked(actions) {
+                            super::chat_actions::hide(cx, room_id, self.latest_timestamp, false);
+                            self.set_swipe_open(cx, false);
+                        } else if self.button(cx, ids!(swipe_delete)).clicked(actions) {
+                            super::chat_actions::confirm_delete(cx, room_id, self.latest_timestamp);
+                            self.set_swipe_open(cx, false);
+                        }
+                    }
+                }
+                let down = match event {
+                    Event::MouseDown(e) => Some(e.abs),
+                    Event::TouchUpdate(e) => e.touches.iter().find(|t| t.state == TouchState::Start).map(|t| t.abs),
+                    _ => None,
+                };
+                if let Some(abs) = down {
+                    let rect = self.view.area().rect(cx);
+                    if !rect.contains(abs) || abs.x < rect.pos.x + rect.size.x - 224.0 {
+                        self.set_swipe_open(cx, false);
+                        self.swipe_dragged = true;
+                        return;
+                    }
+                }
+                return;
+            }
         }
 
         if self.is_context_menu_open
@@ -362,6 +516,7 @@ impl Widget for RoomsListEntryContent {
             //       We should add a context menu for invited rooms.
             match hit {
                 Hit::FingerDown(fe) => {
+                    self.swipe_dragged = false;
                     cx.set_key_focus(area);
                     if !self.is_invited && fe.device.mouse_button().is_some_and(|b| b.is_secondary()) {
                         self.is_context_menu_open = true;
@@ -371,6 +526,13 @@ impl Widget for RoomsListEntryContent {
                         );
                     }
                 }
+                Hit::FingerMove(fe) if self.mobile && !self.is_invited => {
+                    let delta = fe.abs - fe.abs_start;
+                    if delta.x < -48.0 && -delta.x > delta.y.abs() * 2.0 {
+                        self.swipe_dragged = true;
+                        self.set_swipe_open(cx, true);
+                    }
+                }
                 Hit::FingerLongPress(fe) if !self.is_invited => {
                     self.is_context_menu_open = true;
                     cx.widget_action(
@@ -378,7 +540,7 @@ impl Widget for RoomsListEntryContent {
                         RoomsListEntryAction::SecondaryClicked(room_id, fe.abs),
                     );
                 }
-                Hit::FingerUp(fe) if fe.is_over && fe.is_primary_hit() && fe.was_tap() => {
+                Hit::FingerUp(fe) if !self.swipe_dragged && fe.is_over && fe.is_primary_hit() && fe.was_tap() => {
                     cx.widget_action(uid, RoomsListEntryAction::PrimaryClicked(room_id));
                 }
                 _ => { }
@@ -402,9 +564,23 @@ impl Widget for RoomsListEntryContent {
 }
 
 impl RoomsListEntryContent {
+    fn set_swipe_open(&mut self, cx: &mut Cx, open: bool) {
+        if open && !self.swipe_open {
+            if let Some(room) = &self.room_id { cx.action(super::chat_actions::ChatSwipeOpened(room.clone())); }
+        }
+        self.swipe_open = open;
+        self.view.view(cx, ids!(swipe_actions)).set_visible(cx, open);
+        let shift = if open {224.0} else {0.0};
+        if let Some(mut row) = self.view.view(cx, ids!(chat_row)).borrow_mut() {
+            row.walk.margin = Inset {left: -shift, right: shift, ..Default::default()};
+        }
+        self.redraw(cx);
+    }
     fn set_room(&mut self, cx: &mut Cx, room_id: &RoomId, is_invited: bool) {
         // If the room ID changed, reset any UI state that belongs to the previous room.
         if self.room_id.as_deref() != Some(room_id) {
+            self.set_swipe_open(cx, false);
+            self.left_swipe = Default::default();
             self.is_context_menu_open = false;
             self.animator_cut(cx, ids!(bg_hover.off));
             self.room_id = Some(room_id.to_owned());
@@ -418,17 +594,33 @@ impl RoomsListEntryContent {
         cx: &mut Cx,
         room_info: &JoinedRoomInfo,
     ) {
+        self.latest_timestamp = room_info.latest.as_ref().map(|e| e.timestamp.0.into()).unwrap_or(0);
+        self.has_unreads = room_info.is_marked_unread || room_info.num_unread_messages > 0 || room_info.num_unread_mentions > 0;
+        self.button(cx, ids!(swipe_unread)).set_text(cx, if self.has_unreads {"Read"} else {crate::i18n::tr("Unread")});
         // Note: in general, we must always set all fields in case a rooms list entry widget
         // was re-used by the portal list, to avoid showing any old content for a different entry.
         self.view.label(cx, ids!(room_name)).set_text(cx, &room_info.room_name_id.display());
         let timestamp = self.view.label(cx, ids!(timestamp));
         let latest_message = self.view.html_or_plaintext(cx, ids!(latest_message));
-        if let Some(latest) = room_info.latest.as_ref() {
-            timestamp.set_text(cx, relative_format(latest.timestamp).as_deref().unwrap_or(""));
-            latest_message.show_html(cx, &latest.text);
+        if let Some(latest) = room_info.latest.as_ref().filter(|e| super::chat_actions::cleared_through(room_info.room_name_id.room_id()).is_none_or(|t| u64::from(e.timestamp.0) > t)) {
+            let time = if self.mobile {
+                utils::unix_time_millis_to_datetime(latest.timestamp).map(|dt| {
+                    let today = chrono::Local::now().date_naive();
+                    let date = dt.date_naive();
+                    if date == today { dt.format("%H:%M").to_string() }
+                    else if Some(date) == today.pred_opt() { crate::i18n::tr("Yesterday").to_owned() }
+                    else if (0..7).contains(&today.signed_duration_since(date).num_days()) { crate::i18n::tr(&dt.format("%a").to_string()).to_owned() }
+                    else { dt.format("%m/%d/%y").to_string() }
+                }).map(Cow::Owned)
+            } else { relative_format(latest.timestamp) };
+            timestamp.set_text(cx, time.as_deref().unwrap_or(""));
+            let preview = if self.mobile && room_info.is_direct {
+                latest.direct_text.as_deref().unwrap_or(&latest.text)
+            } else { &latest.text };
+            latest_message.show_html(cx, preview);
         } else {
             timestamp.set_text(cx, "");
-            latest_message.show_plaintext(cx, "[No recent messages]");
+            latest_message.show_plaintext(cx, crate::i18n::tr("[No recent messages]"));
         }
 
         self.view.unread_badge(cx, ids!(unread_badge)).update_counts(
@@ -436,6 +628,13 @@ impl RoomsListEntryContent {
             room_info.num_unread_mentions,
             room_info.num_unread_messages,
         );
+        if self.mobile {
+            self.view.view(cx, ids!(muted_indicator)).set_visible(cx, room_info.notification_mode == Some(matrix_sdk::notification_settings::RoomNotificationMode::Mute));
+            let count = room_info.num_unread_messages.max(room_info.num_unread_mentions);
+            self.view.view(cx, ids!(mobile_badge)).set_visible(cx, room_info.is_marked_unread || count > 0);
+            let text = if count > 99 { "99+".into() } else if count == 0 { "•".into() } else { count.to_string() };
+            self.view.label(cx, ids!(count)).set_text(cx, &text);
+        }
         self.draw_common(cx, &room_info.room_avatar, room_info.is_selected);
         // Show tombstone icon if the room is tombstoned
         self.view.view(cx, ids!(tombstone_icon)).set_visible(cx, room_info.is_tombstoned);
@@ -447,17 +646,18 @@ impl RoomsListEntryContent {
         cx: &mut Cx,
         room_info: &InvitedRoomInfo,
     ) {
+        self.view.view(cx, ids!(muted_indicator)).set_visible(cx, false);
         let name = room_info.room_name_id.display();
         let name = match room_info.is_space {
-            true => Cow::Owned(format!("[Space] {name}")),
+            true => Cow::Owned(crate::i18n::format("[Space] {name}", &[("name", (name).to_string())])),
             false => name,
         };
         self.view.label(cx, ids!(room_name)).set_text(cx, &name);
         // Hide the timestamp field, and use the latest message field to show the inviter.
         self.view.label(cx, ids!(timestamp)).set_text(cx, "");
         let inviter_string = match &room_info.inviter_info {
-            Some(InviterInfo { user_id, display_name: Some(dn), .. }) => format!("Invited by <b>{}</b> ({})", htmlize::escape_text(dn), htmlize::escape_text(user_id.as_str())),
-            Some(InviterInfo { user_id, .. }) => format!("Invited by {}", htmlize::escape_text(user_id.as_str())),
+            Some(InviterInfo { user_id, display_name: Some(dn), .. }) => crate::i18n::format("Invited by <b>{0}</b> ({1})", &[("0", (htmlize::escape_text(dn)).to_string()), ("1", (htmlize::escape_text(user_id.as_str())).to_string())]),
+            Some(InviterInfo { user_id, .. }) => crate::i18n::format("Invited by {0}", &[("0", (htmlize::escape_text(user_id.as_str())).to_string())]),
             None => String::from("You were invited"),
         };
         self.view.html_or_plaintext(cx, ids!(latest_message)).show_html(cx, &inviter_string);
@@ -466,6 +666,10 @@ impl RoomsListEntryContent {
         self.view
             .unread_badge(cx, ids!(unread_badge))
             .update_counts(false, 1, 0);
+        if self.mobile {
+            self.view.view(cx, ids!(mobile_badge)).set_visible(cx, true);
+            self.view.label(cx, ids!(count)).set_text(cx, "!");
+        }
 
         self.draw_common(cx, &room_info.room_avatar, room_info.is_selected);
     }
@@ -514,9 +718,9 @@ impl RoomsListEntryContent {
         // The selected row signals the active room with the soft teal wash alone
         // (see the draw_bg shader), so the text keeps identical dark ink in both
         // states and stays fully legible.
-        let message_text_color = RBX_FG_SECONDARY;
-        let room_name_color = RBX_FG_PRIMARY;
-        let timestamp_color = RBX_FG_TERTIARY;
+        let message_text_color = if self.mobile { vec4(0.6, 0.6, 0.6, 1.0) } else { RBX_FG_SECONDARY };
+        let room_name_color = if self.mobile { vec4(0.1, 0.1, 0.1, 1.0) } else { RBX_FG_PRIMARY };
+        let timestamp_color = if self.mobile { vec4(0.7, 0.7, 0.7, 1.0) } else { RBX_FG_TERTIARY };
         let code_bg_color = RBX_BG_SUNKEN;
 
         // Toggle the background color via the animator (handles selected/deselected bg).

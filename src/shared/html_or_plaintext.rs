@@ -65,7 +65,7 @@ script_mod! {
                     color: (RBX_ACCENT),
                     text_style: MESSAGE_TEXT_STYLE { font_size: (MESSAGE_FONT_SIZE), line_spacing: 1.0 },
                 }
-                text: "Unknown",
+                text: #(crate::i18n::tr("Unknown")),
             }
         }
     }

@@ -90,7 +90,7 @@ script_mod! {
                     border_color_down: #CCCCCC
                     border_radius: 4.0
                 }
-                text: "Show more links"
+                text: #(crate::i18n::tr("Show more links")) i18n_text: "Show more links"
             }
 
             collapse_button := RobrixIconButton {
@@ -121,7 +121,7 @@ script_mod! {
                     border_color_down: #CCCCCC
                     border_radius: 4.0
                 }
-                text: "Show fewer links"
+                text: #(crate::i18n::tr("Show fewer links")) i18n_text: "Show fewer links"
             }
         }
 

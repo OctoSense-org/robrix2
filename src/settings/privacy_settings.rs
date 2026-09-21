@@ -31,7 +31,7 @@ script_mod! {
                 padding: Inset{left: 12, right: 15}
                 icon_walk: Walk{width: 0, height: 0}
                 spacing: 0
-                text: "Unblock"
+                text: #(crate::i18n::tr("Unblock")) i18n_text: "Unblock"
             }
 
             user_id := Label {
@@ -56,15 +56,15 @@ script_mod! {
         LineH { width: 425, padding: 10, margin: Inset{top: 20, bottom: 5} }
 
         TitleLabel {
-            text: "Privacy Settings"
+            text: #(crate::i18n::tr("Privacy Settings")) i18n_text: "Privacy Settings"
         }
 
         SubsectionLabel {
-            text: "Blocked Users"
+            text: #(crate::i18n::tr("Blocked Users")) i18n_text: "Blocked Users"
         }
 
         mod.widgets.SettingsSectionDescription {
-            body: "<ul><li>You won't see any messages or invites from a blocked user, in any room.</li></ul>"
+            body: #(crate::i18n::tr("<ul><li>You won't see any messages or invites from a blocked user, in any room.</li></ul>")) i18n_body: "<ul><li>You won't see any messages or invites from a blocked user, in any room.</li></ul>"
         }
 
         no_blocked_users_label := View {
@@ -77,7 +77,7 @@ script_mod! {
                     color: (COLOR_TEXT_WARNING_NOT_FOUND),
                     text_style: MESSAGE_TEXT_STYLE { font_size: 11 },
                 }
-                text: "You haven't blocked anyone."
+                text: #(crate::i18n::tr("You haven't blocked anyone.")) i18n_text: "You haven't blocked anyone."
             }
         }
 

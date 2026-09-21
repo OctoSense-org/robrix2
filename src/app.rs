@@ -24,6 +24,12 @@ use crate::{
     }
 };
 use crate::shared::file_upload_modal::{FileUploadModalWidgetRefExt, FileUploadModalAction};
+#[cfg(feature = "agent_chat")]
+use crate::agent_chat::ops::ui::{AgentOpsAction, AgentOpsPanelWidgetRefExt};
+use crate::moments::ui::{MomentsAction, MomentsPanelWidgetRefExt};
+use crate::mini_app::{MiniAppAction, MiniAppPanelWidgetRefExt};
+use crate::forwarding::{ForwardAction, ForwardPanelWidgetRefExt};
+use crate::home::room_history::{RoomHistoryAction, RoomHistoryPanelWidgetRefExt};
 
 script_mod! {
     use mod.prelude.widgets.*
@@ -145,6 +151,21 @@ script_mod! {
                             content := FileUploadModal {}
                         }
 
+                        mini_app_modal := Modal {
+                            can_dismiss: false
+                            content := MiniAppPanel {}
+                        }
+                        forward_modal := Modal {
+                            can_dismiss: false
+                            content := ForwardPanel {}
+                        }
+                        agent_ops_modal := Modal {can_dismiss: false content := AgentOpsPanel {}}
+                        moments_modal := Modal {can_dismiss: false content := MomentsPanel {}}
+                        room_history_modal := Modal {
+                            can_dismiss: false
+                            content := RoomHistoryPanel {}
+                        }
+
                         PopupList {}
 
                         // Tooltips must be shown in front of all other UI elements,
@@ -261,6 +282,13 @@ impl MatchEvent for App {
         }
 
         for action in actions {
+            // Opening a hidden conversation is explicit on both mobile and desktop.
+            // Mobile selection does not emit the desktop RoomFocused action.
+            if let RoomsListAction::Selected(room) = action.as_widget_action().cast()
+                && crate::home::chat_actions::restore(room.room_id())
+            {
+                cx.action(crate::home::chat_actions::ChatVisibilityChanged);
+            }
             match action.downcast_ref() {
                 Some(LogoutConfirmModalAction::Open) => {
                     self.ui.logout_confirm_modal(cx, ids!(logout_confirm_modal.content)).reset_state(cx);
@@ -286,6 +314,14 @@ impl MatchEvent for App {
                     continue;
                 }
                 Some(LogoutAction::ClearAppState { on_clear_appstate }) =>  {
+                    let modal = self.ui.modal(cx, ids!(moments_modal));
+                    self.ui.moments_panel(cx, ids!(moments_modal.content)).action(cx, modal, &MomentsAction::Close);
+                    #[cfg(feature = "agent_chat")]
+                    {
+                        crate::agent_chat::reply::clear_session(cx);
+                        let modal = self.ui.modal(cx, ids!(agent_ops_modal));
+                        self.ui.agent_ops_panel(cx, ids!(agent_ops_modal.content)).action(cx, modal, &AgentOpsAction::Close);
+                    }
                     // Clear and reset all app state to its default.
                     clear_all_app_state(cx);
                     self.ui.modal(cx, ids!(verification_modal)).close(cx);
@@ -319,6 +355,31 @@ impl MatchEvent for App {
                 }
                 // Do NOT continue here — let the action propagate to the LoginScreen widget,
                 // which will open the login_status_modal to show the failure message.
+            }
+
+            #[cfg(feature = "agent_chat")]
+            if let Some(action) = action.downcast_ref::<AgentOpsAction>() {
+                let modal = self.ui.modal(cx, ids!(agent_ops_modal));
+                self.ui.agent_ops_panel(cx, ids!(agent_ops_modal.content)).action(cx, modal, action);
+            }
+            // Open, share or close a Matrix web mini-app card.
+            if let Some(action) = action.downcast_ref::<MomentsAction>() {
+                let modal = self.ui.modal(cx, ids!(moments_modal));
+                self.ui.moments_panel(cx, ids!(moments_modal.content)).action(cx, modal, action);
+            }
+            if let Some(action) = action.downcast_ref::<RoomHistoryAction>() {
+                let modal = self.ui.modal(cx, ids!(room_history_modal));
+                self.ui.room_history_panel(cx, ids!(room_history_modal.content)).action(cx, modal, action);
+            }
+            if let Some(action) = action.downcast_ref::<ForwardAction>() {
+                let modal = self.ui.modal(cx, ids!(forward_modal));
+                self.ui.forward_panel(cx, ids!(forward_modal.content)).action(cx, modal, action);
+                continue;
+            }
+            if let Some(action) = action.downcast_ref::<MiniAppAction>() {
+                let modal = self.ui.modal(cx, ids!(mini_app_modal));
+                self.ui.mini_app_panel(cx, ids!(mini_app_modal.content)).action(cx, modal, action);
+                continue;
             }
 
             // Handle actions for the file upload modal.
@@ -418,6 +479,9 @@ impl MatchEvent for App {
             // Handle actions that instruct us to update the top-level app state.
             match action.downcast_ref() {
                 Some(AppStateAction::RoomFocused(selected_room)) => {
+                    if crate::home::chat_actions::restore(selected_room.room_id()) {
+                        cx.action(crate::home::chat_actions::ChatVisibilityChanged);
+                    }
                     self.app_state.selected_room = Some(selected_room.clone());
                     continue;
                 }
@@ -727,9 +791,14 @@ impl AppMain for App {
         script_eval!(vm, {
             mod.theme = mod.themes.light
         });
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        crate::apple_fonts::install(vm);
         makepad_widgets::widgets_mod(vm);
+        crate::i18n::install(vm);
         makepad_code_editor::script_mod(vm);
         crate::shared::script_mod(vm);
+        crate::mini_app::script_mod(vm);
+        crate::forwarding::script_mod(vm);
 
         #[cfg(feature = "tsp")]
         crate::tsp::script_mod(vm);
@@ -753,6 +822,7 @@ impl AppMain for App {
         crate::verification_modal::script_mod(vm);
         crate::profile::script_mod(vm);
         crate::home::script_mod(vm);
+        crate::moments::script_mod(vm);
         crate::login::script_mod(vm);
         crate::logout::script_mod(vm);
 
@@ -778,6 +848,9 @@ impl AppMain for App {
         self.match_event(cx, event);
         let scope = &mut Scope::with_data(&mut self.app_state);
         self.ui.handle_event(cx, event, scope);
+        if matches!(event, Event::LiveEdit) {
+            crate::i18n::refresh_ui(cx, &self.ui);
+        }
         self.handle_lifecycle_event(cx, event);
 
     }
