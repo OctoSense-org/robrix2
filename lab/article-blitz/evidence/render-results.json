@@ -1,0 +1,46 @@
+{
+  "blitz_revision": "e99fbdbd1d03b9f0aa1622c3f810d95daac92042",
+  "platform": "macos",
+  "qualification": "Synthetic article fixtures; not a WeChat visual similarity score or full HTML editor.",
+  "results": [
+    {
+      "clipped": false,
+      "css_content_height": 1526.0,
+      "denied": [],
+      "elapsed_ms": 623,
+      "height": 3052,
+      "name": "mobile-light",
+      "requested": 2,
+      "scale": 2.0,
+      "served": 2,
+      "width": 780,
+      "width_css": 390
+    },
+    {
+      "clipped": false,
+      "css_content_height": 1536.0,
+      "denied": [],
+      "elapsed_ms": 408,
+      "height": 1536,
+      "name": "desktop-light",
+      "requested": 2,
+      "scale": 1.0,
+      "served": 2,
+      "width": 760,
+      "width_css": 760
+    },
+    {
+      "clipped": false,
+      "css_content_height": 1526.0,
+      "denied": [],
+      "elapsed_ms": 548,
+      "height": 3052,
+      "name": "mobile-dark",
+      "requested": 2,
+      "scale": 2.0,
+      "served": 2,
+      "width": 780,
+      "width_css": 390
+    }
+  ]
+}

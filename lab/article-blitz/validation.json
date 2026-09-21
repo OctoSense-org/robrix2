@@ -1,0 +1,36 @@
+{
+  "validated_at_utc": "2026-09-21T17:47:17.796516+00:00",
+  "blitz_revision": "e99fbdbd1d03b9f0aa1622c3f810d95daac92042",
+  "makepad_revision": "47837267faf6970a6cc36acedf9f83846b277307",
+  "tests": {
+    "passed": 14,
+    "failed": 0,
+    "ignored": 0,
+    "command": "cargo +1.98.0 test --locked --manifest-path crates/article-blitz/Cargo.toml --features makepad"
+  },
+  "msrv_check": {
+    "toolchain": "1.94.0",
+    "passed": true,
+    "system_fonts": false,
+    "command": "cargo +1.94.0 check --locked --manifest-path crates/article-blitz/Cargo.toml --no-default-features"
+  },
+  "native": {
+    "passed": true,
+    "ocr_title": true,
+    "ocr_table": true,
+    "scroll_changes_pixels": true,
+    "headless": true,
+    "personal_accounts_used": false
+  },
+  "artifact_sha256": {
+    "crates/article-blitz/tests/fixtures/article.css": "b21a4a8a9d3d15b78a8fa00767048206ba3588ee53c4a35ec09e2b48e7bbfb7d",
+    "crates/article-blitz/tests/fixtures/article.html": "8ef43eb94f3ac522f1e998e4b278080ceaa01da12fe4923993402830f5fa7f0a",
+    "crates/article-blitz/tests/fixtures/cover.png": "679e27cd33992143e9e317201912ee7bb69e936924d418d07e034e9d36705cfd",
+    "lab/article-blitz/evidence/desktop-light.png": "0dc9de1008384e9963c9b8970ac027dad3a21af1dbb26a3528102fea7e0ec5ab",
+    "lab/article-blitz/evidence/mobile-dark.png": "a050dba62914f980e60b88e32aabc42b767a60d7bc1044ab93f863c229de436c",
+    "lab/article-blitz/evidence/mobile-light.png": "5bbae333ae08a4a50abf55b8dbef0cb368165579b34731e302ee3971792c7573",
+    "lab/article-blitz/evidence/native-bottom.png": "fb1bd84252d80d8dc748d273413d530fd51d92034695165be099b8ec4f3202ba",
+    "lab/article-blitz/evidence/native-top.png": "4af9e28277235644ab3c87719090e6c813a14ed840da183c96a74fc6d2085aed"
+  },
+  "qualification": "Static original article fixtures, not a WeChat visual parity benchmark or HTML WYSIWYG editor."
+}

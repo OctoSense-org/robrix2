@@ -1,0 +1,42 @@
+[package]
+name = "article-blitz"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+description = "Host-controlled, offscreen HTML/CSS article rendering for native applications"
+
+[workspace]
+
+[features]
+default = ["system-fonts"]
+system-fonts = ["blitz-dom/system-fonts"]
+makepad = ["dep:makepad-widgets"]
+
+[dependencies]
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "e99fbdbd1d03b9f0aa1622c3f810d95daac92042", default-features = false, features = ["complex-scripts"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "e99fbdbd1d03b9f0aa1622c3f810d95daac92042", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "e99fbdbd1d03b9f0aa1622c3f810d95daac92042", default-features = false }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "e99fbdbd1d03b9f0aa1622c3f810d95daac92042", default-features = false }
+anyrender = "=0.13.0"
+anyrender_vello_cpu = "=0.17.0"
+peniko = "=0.6.1"
+html5ever = "=0.39.0"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
+thiserror = "2"
+
+makepad-widgets = { git = "https://github.com/kevinaboos/makepad", branch = "button-grab-key-focus", features = ["serde"], optional = true }
+
+[[example]]
+name = "native_preview"
+required-features = ["makepad"]
+
+[dev-dependencies]
+png = "0.18"
+serde_json = "1"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0

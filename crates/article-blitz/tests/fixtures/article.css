@@ -1,0 +1,23 @@
+:root { --accent: #337b60; --ink: #263d34; --paper: #ffffff; --muted: #6f8177; --soft: #eef5f0; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: "PingFang SC", system-ui, sans-serif; font-size: 16px; line-height: 1.85; }
+article { max-width: 760px; margin: 0 auto; padding: 30px 24px 36px; }
+header { margin-bottom: 24px; }
+.eyebrow { color: var(--accent); font-size: 12px; letter-spacing: 2px; margin: 0 0 10px; }
+h1 { font-size: 30px; line-height: 1.35; margin: 0 0 12px; font-weight: 700; }
+.byline, figcaption { color: var(--muted); font-size: 12px; }
+figure { margin: 0 0 24px; } img { width: 100%; height: auto; border-radius: 8px; } figcaption { text-align: center; margin-top: 8px; }
+p { margin: 0 0 18px; } strong { color: var(--accent); }
+.intro { padding: 18px 20px; background: var(--soft); border-radius: 10px; margin-bottom: 24px; }
+.intro p { margin: 0; }
+h2 { font-size: 21px; line-height: 1.5; margin: 28px 0 16px; border-bottom: 1px solid #c8dace; padding-bottom: 10px; }
+h2 span { font-size: 14px; color: var(--accent); margin-right: 8px; }
+blockquote { margin: 24px 0; padding: 8px 0 8px 18px; border-left: 4px solid var(--accent); color: var(--muted); }
+blockquote p { margin: 0; }
+.card { border: 1px solid #c8dace; padding: 18px 20px; border-radius: 8px; }
+h3 { font-size: 17px; margin: 0 0 8px; } ul { margin: 0; padding-left: 24px; } li { margin-bottom: 6px; }
+table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14px; } th, td { border: 1px solid #c8dace; padding: 10px 12px; text-align: left; } th { background: var(--soft); }
+.closing { text-align: center; color: var(--accent); margin-top: 30px; }
+footer { text-align: center; font-size: 11px; letter-spacing: 1px; color: var(--muted); margin-top: 36px; }
+@media (min-width: 600px) { article { padding: 48px; } h1 { font-size: 38px; } }
+@media (prefers-color-scheme: dark) { :root { --accent: #8bcca9; --ink: #dbe7de; --paper: #17231d; --muted: #a5b8aa; --soft: #23372a; } }
