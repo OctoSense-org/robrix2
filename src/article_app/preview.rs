@@ -1,5 +1,5 @@
 //! Optional preview of validated structured articles. No raw public HTML import.
-use article_blitz::{RenderedArticle, RenderOptions, ResourceMap};
+use makepad_html_renderer::{RenderedDocument, RenderOptions, ResourceMap};
 use article_core::{assets::crop_cover, document::*, host::Capability};
 use super::{model::Grant, storage};
 use std::sync::{Arc, Mutex, TryLockError};
@@ -64,7 +64,7 @@ pub fn render(
     document: Document,
     grant: Grant,
     options: RenderOptions,
-) -> Result<Arc<RenderedArticle>, String> {
+) -> Result<Arc<RenderedDocument>, String> {
     // At most one expensive render runs in this process. Closing/reopening the
     // app cannot create an unbounded queue of CPU render jobs.
     let _lock = match RENDERING.try_lock() {
@@ -82,7 +82,7 @@ pub fn render(
     })?;
     grant.authorize(Capability::ReadDrafts)?;
     let result =
-        article_blitz::render_html(&html, options, &resources).map_err(|e| e.to_string())?;
+        makepad_html_renderer::render_html(&html, options, &resources).map_err(|e| e.to_string())?;
     grant.authorize(Capability::ReadDrafts)?;
     Ok(Arc::new(result))
 }
@@ -99,7 +99,7 @@ mod tests {
         assert!(!html.contains("<script>"));
         assert!(!html.contains("<img src=file:"));
         let bitmap =
-            article_blitz::render_html(&html, RenderOptions::default(), &resources).unwrap();
+            makepad_html_renderer::render_html(&html, RenderOptions::default(), &resources).unwrap();
         assert!(bitmap.resources.denied.is_empty());
         assert!(!bitmap.clipped);
     }
@@ -123,10 +123,10 @@ mod tests {
             ..Default::default()
         };
         let (html, resources) = bundle(&doc, |_| Ok(bytes.clone())).unwrap();
-        let half = article_blitz::render_html(&html, options, &resources).unwrap();
+        let half = makepad_html_renderer::render_html(&html, options, &resources).unwrap();
         doc.blocks.last_mut().unwrap().width = 100;
         let (html, resources) = bundle(&doc, |_| Ok(bytes.clone())).unwrap();
-        let full = article_blitz::render_html(&html, options, &resources).unwrap();
+        let full = makepad_html_renderer::render_html(&html, options, &resources).unwrap();
         assert_eq!(full.resources.denied.len(), 0);
         assert!(full.css_content_height > half.css_content_height + 100.0);
     }

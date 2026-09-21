@@ -8,7 +8,7 @@ process, account service or installation.
 | --- | --- | --- |
 | `article-core` | Documents, themes, undo/redo, normalized assets, storage, scoped grants and publication contract | Current account, login epoch, consent, trusted storage root, publication implementation |
 | `article-makepad` | Native rich input, layout, presentation and Apple font setup | Screen flow, localization, image picker, target selection |
-| `article-blitz` | Bounded HTML/CSS rendering and native bitmap view | Authorized resource bytes, worker scheduling, stale-result rejection and clipping notice |
+| [makepad-html](https://github.com/OctoSense-org/makepad-html) | Bounded HTML/CSS rendering and native bitmap view | Authorized resource bytes, worker scheduling, stale-result rejection and clipping notice |
 | Robrix adapter | Matrix publication/read/update/withdrawal, encrypted media and mini-app sharing | Matrix login and credentials stay here |
 
 `dependencies.json` records the independently resolved core/native/Blitz
@@ -26,7 +26,7 @@ crates/article-makepad/target/debug/examples/standalone --data-dir=/tmp/article-
 Run Robrix with the optional native CSS preview:
 
 ```sh
-cargo run --locked --features agent_chat,article_blitz --bin robrix
+cargo run --locked --features agent_chat,html_preview --bin robrix
 ```
 
 In the mobile layout: Discover → Article editor → consent → open/create a draft
@@ -39,7 +39,7 @@ Validation commands (macOS, isolated local test profiles):
 ```sh
 cargo test --locked --manifest-path crates/article-core/Cargo.toml --features l0
 cargo test --locked --manifest-path crates/article-makepad/Cargo.toml --lib
-cargo test --locked --features agent_chat,article_blitz --lib
+cargo test --locked --features agent_chat,html_preview --lib
 cargo check --locked --lib
 python3 tools/wechat-ux/check_i18n.py
 python3 tools/wechat-ux/live/native_article_components.py
@@ -60,8 +60,31 @@ tests ignored. Eighteen native checks passed, including the editor/reader smoke
 check with Blitz disabled (`evidence/robrix-without-blitz.png`).
 Standalone editing/save/reopen screenshots are in `evidence/standalone-*.png`;
 Robrix HTML/CSS preview screenshots are in `evidence/robrix-css-*.png`.
-Blitz's independent 14-test renderer suite and Makepad scroll verification are
-in [the renderer lab](../article-blitz/README.md).
+Those results describe the original shared-component integration. Current
+renderer tests and Makepad scroll verification now live in
+[makepad-html](https://github.com/OctoSense-org/makepad-html/tree/main/lab).
+
+## Independent renderer extraction (2026-09-21)
+
+Robrix consumes the published makepad-html revision
+`86892f449cd00a8998bec2d1667a67a53d9cf408`; no sibling checkout or consumer Cargo
+patch is needed. [ADR 0004](../../docs/adr/0004-independent-makepad-html.md)
+records the ownership boundary. The following checks passed on macOS with
+Rust 1.98.0 against that Git dependency:
+
+```sh
+cargo +1.98.0 check --features html_preview
+cargo +1.98.0 test --offline --locked --features html_preview --lib article_app::preview::tests
+cargo +1.98.0 check --offline --locked --no-default-features
+```
+
+Both preview adapter tests passed. The independent renderer passed 18 default
+tests, 20 extended tests, native screenshot/scroll checks with built-in and
+explicit-file fixtures, and all 28 patched corpus captures. These are regression
+and integration checks; they do not establish complete WeChat compatibility.
+See the renderer's
+[extraction record](https://github.com/OctoSense-org/makepad-html/blob/main/docs/extraction-validation.json)
+for the standalone evidence.
 
 Remaining boundaries: this is shared Rust code, not an OctoSense application
 package. That host still needs its own adapters and runtime validation. The

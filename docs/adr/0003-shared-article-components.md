@@ -1,6 +1,7 @@
 # ADR 0003: Article components independent of their host
 
-Status: accepted, implementation in `wechat-ui`.
+Status: accepted, implementation in `wechat-ui`. Renderer ownership is superseded
+by [ADR 0004](0004-independent-makepad-html.md).
 
 ## Context
 
@@ -24,7 +25,7 @@ Split reusable Rust libraries from host orchestration:
   picker, consent UI, Matrix wire format, target selection, E2EE media,
   publication retries, replacement events and withdrawal. Robrix supplies
   `RobrixArticleHost` and `RobrixPublisher` to the shared code.
-- `article-blitz`: separately validated, optional HTML/CSS preview renderer.
+- `makepad-html`: separately validated, optional HTML/CSS preview renderer.
   Rendering arbitrary HTML does not make the v2 structured editor an arbitrary
   HTML WYSIWYG editor. The document schema is not expanded by this extraction.
 

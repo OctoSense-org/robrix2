@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional Blitz preview in the real Robrix UI, using a disposable Palpo user.
 
-Requires a binary built with agent_chat,article_blitz. Seeds an already normalized
+Requires a binary built with agent_chat,html_preview. Seeds an already normalized
 test illustration; the OS file picker and arbitrary HTML import are not tested.
 """
 import json

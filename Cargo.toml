@@ -16,7 +16,7 @@ metadata.makepad-auto-version = "zqpv-Yj-K7WNVK2I8h5Okhho46Q="
 [dependencies]
 article-core = { path = "crates/article-core", features = ["l0"] }
 article-makepad = { path = "crates/article-makepad" }
-article-blitz = { path = "crates/article-blitz", optional = true, features = ["makepad"] }
+makepad-html-renderer = { package = "makepad-html", git = "https://github.com/OctoSense-org/makepad-html", rev = "86892f449cd00a8998bec2d1667a67a53d9cf408", optional = true, features = ["makepad"] }
 # makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev", features = ["serde"] }
 # makepad-code-editor = { git = "https://github.com/makepad/makepad", branch = "dev" }
 
@@ -137,7 +137,9 @@ webpki-root-certs = "1"
 [features]
 default = []
 ## Experimental CPU HTML/CSS article preview; the native editor stays available.
-article_blitz = ["dep:article-blitz"]
+html_preview = ["dep:makepad-html-renderer"]
+# Compatibility for existing Robrix build commands.
+article_blitz = ["html_preview"]
 ## Enables experimental support for using TSP wallets.
 tsp = ["dep:tsp_sdk", "dep:quinn", "dep:aws-lc-rs", "dep:percent-encoding", "dep:reqwest"]
 
