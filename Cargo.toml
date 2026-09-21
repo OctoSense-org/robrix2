@@ -49,6 +49,8 @@ futures-util = "0.3"
 hashbrown = { version = "0.16", features = ["raw-entry"] }
 htmlize = { version = "1.0.5", features = ["unescape"] }
 indexmap = "2.6.0"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
+pulldown-cmark = "0.13.0"
 libc = "0.2"
 mime = "0.3"
 mime_guess = "2.0"
@@ -64,6 +66,7 @@ matrix-sdk = { git = "https://github.com/matrix-org/matrix-rust-sdk", default-fe
     ## The SDK no longer registers a rustls crypto provider unless we ask for one.
     "rustls-aws-lc-rs",
 ] }
+matrix-sdk-crypto = { git = "https://github.com/matrix-org/matrix-rust-sdk", default-features = false }
 matrix-sdk-ui = { git = "https://github.com/matrix-org/matrix-rust-sdk", default-features = false }
 ## Use the same ruma version as what's specified in matrix-sdk's Cargo.toml.
 ## Enable a few extra features:

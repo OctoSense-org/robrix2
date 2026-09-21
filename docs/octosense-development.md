@@ -58,3 +58,9 @@ source admission, recipient consent, native Markdown/Html rendering and Matrix
 publishing. The broader arbitrary-app catalog/runtime and external backend
 identity exchange remain proposed. The snapshot counts above describe the
 initial fork; current article-editor test evidence is recorded with that flow.
+
+The article studio v2 adds native formatted editing, images, themes, cover art,
+full review and Matrix publication revisions/withdrawal. Its generated UX,
+measured scene references, host bindings and validation are tracked in
+[the v2 delivery](../lab/article-editor-v2/README.md). Work remains on `wechat-ui`;
+this delivery does not merge `main`.

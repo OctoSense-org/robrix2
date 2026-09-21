@@ -102,15 +102,15 @@ impl WebMiniApp {
 
 /// Shared native packages and web cards keep distinct launch paths.
 #[derive(Clone, Debug)]
-pub enum SharedMiniApp { Web(WebMiniApp), Article(crate::article_app::ArticlePackage) }
+pub enum SharedMiniApp { Web(WebMiniApp), Article(crate::article_app::ArticlePackage), PublishedArticle { title: String, room: ruma::OwnedRoomId, event: ruma::OwnedEventId } }
 impl SharedMiniApp {
     pub fn from_message(message: &MessageType) -> Result<Self, String> {
         if message.msgtype() == crate::article_app::MSGTYPE {
             crate::article_app::ArticlePackage::from_message(message).map(Self::Article)
         } else { WebMiniApp::from_message(message).map(Self::Web) }
     }
-    pub fn title(&self) -> &str { match self {Self::Web(app)=>&app.title, Self::Article(_)=>crate::i18n::tr("Article editor")} }
-    fn origin(&self) -> String {match self {Self::Web(app)=>app.origin(),Self::Article(_)=>crate::i18n::tr("Markdown · Native preview").into()}}
+    pub fn title(&self) -> &str { match self {Self::PublishedArticle{title,..}=>title, Self::Web(app)=>&app.title, Self::Article(_)=>crate::i18n::tr("Article editor")} }
+    fn origin(&self) -> String {match self {Self::PublishedArticle{..}=>crate::i18n::tr("Read full article").into(),Self::Web(app)=>app.origin(),Self::Article(_)=>crate::i18n::tr("Markdown · Native preview").into()}}
 }
 
 #[derive(Clone, Debug)]
@@ -245,6 +245,7 @@ impl Widget for MiniAppCard {
                     match app {
                         SharedMiniApp::Web(app) => cx.action(MiniAppAction::Open { app: app.clone(), timeline: timeline.clone() }),
                         SharedMiniApp::Article(_) => cx.action(crate::article_app::ArticleAction::Open),
+                        SharedMiniApp::PublishedArticle{room,event,..} => cx.action(crate::article_app::ArticleAction::Read { room: room.clone(), event: event.clone() }),
                     }
                 }
             }

@@ -35,7 +35,7 @@ impl ArticlePackage {
     pub fn builtin() -> Self {
         Self {
             app_id: APP_ID.into(),
-            version: 1,
+            version: 2,
             source_hash: blake3::hash(SOURCE.as_bytes()).to_hex().to_string(),
         }
     }
@@ -51,7 +51,8 @@ impl ArticlePackage {
                 .ok_or("Missing article app")?,
         )
         .map_err(|_| "Invalid article app")?;
-        if package != Self::builtin() {
+        let builtin = Self::builtin();
+        if package.app_id != builtin.app_id || package.source_hash != builtin.source_hash || !matches!(package.version, 1 | 2) {
             return Err("This article app needs a compatible Robrix update.".into());
         }
         Ok(package)

@@ -11,6 +11,31 @@
 - First application: a native Markdown/HTML post editor, opened from a chat or
   Discover → Article editor, with local drafts, preview and explicit publication.
 
+## Article studio v2 (2026-09-21)
+
+The built-in package now advertises version 2 while accepting the same reviewed
+version-1 L0 source descriptor. Native host capabilities include structured rich
+editing, local image normalization, themes, covers, complete article reading and
+explicitly confirmed publication/update/withdrawal. No remote code admission was
+added. See [the v2 plan and evidence](../../lab/article-editor-v2/README.md).
+
+Every asynchronous operation captures a per-open grant and rechecks its account,
+session generation, expiry and revocation. Media uploads honor room encryption;
+reader downloads use the host's Matrix HTTP client, enforce byte and dimension
+limits, decrypt with the SDK crypto implementation, and verify the content hash.
+Package descriptors never transport credentials, documents, media keys or grants.
+Published articles intentionally contain their content and media descriptors,
+inside the room's encrypted event when the room uses E2EE.
+
+A durable operation holds the exact confirmed document/destination/transaction.
+A server-confirmed result is saved before reporting publication success. An
+uncertain operation remains retryable with its original transaction; editing a
+copy does not erase that task. Updates target the original event. Withdrawal
+redacts the original and its discovered revisions; cached or forwarded copies
+cannot be recalled. Palpo's empty replacement relation index is handled by a
+bounded SDK history scan back to the original. Incomplete history is an explicit
+error, not a successful withdrawal.
+
 ## Decision
 
 Keep the logged-in Matrix SDK client and all credentials in Robrix's trusted
@@ -146,7 +171,10 @@ outcome and never silently replay an uncertain send under a new account.
 
 Identity responses contain only granted fields, such as Matrix user ID, display
 name and avatar reference. Render identity in trusted host chrome when the app
-does not need to receive it. The editor needs no room-history read permission.
+does not need to receive it. The v1 editor needed no room-history read permission.
+In v2 the trusted host reads the selected article and bounded replacement history
+for reading, conflict checks and withdrawal. This is not exposed as an arbitrary
+room-history API to the L0 package.
 
 ## Authentication when another user receives the app
 

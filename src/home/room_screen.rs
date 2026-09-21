@@ -4720,7 +4720,26 @@ fn populate_message_view(
             } else {
                 None
             };
+            let article = event_tl_item.latest_json().and_then(|raw| {
+                let value: serde_json::Value = serde_json::from_str(raw.json().get()).ok()?;
+                crate::article_app::backend::ArticleContent::parse(&value["content"]).ok()
+            });
             match msg.msgtype() {
+                MessageType::Text(_) if article.is_some() && event_tl_item.event_id().is_some() => {
+                    has_html_body = false;
+                    let template = if mobile {
+                        if event_tl_item.is_own() { id!(MobileOwnMiniAppMessage) } else { id!(MobileMiniAppMessage) }
+                    } else { id!(MiniAppMessage) };
+                    let (item, _) = list.item_with_existed(cx, item_id, template);
+                    item.link_preview(cx, ids!(content.link_preview_view)).clear(cx);
+                    web_mini_app = Some(SharedMiniApp::PublishedArticle {
+                        title: article.unwrap().document.title,
+                        room: timeline_kind.room_id().to_owned(),
+                        event: event_tl_item.event_id().unwrap().to_owned(),
+                    });
+                    new_drawn_status.content_drawn = true;
+                    (item, false)
+                }
                 message if message.msgtype() == crate::forwarding::MSGTYPE => {
                     has_html_body = false;
                     let template = if mobile {
