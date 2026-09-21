@@ -48,6 +48,9 @@ It proposes account/instance-bound operations, host-owned credentials and an
 offline Markdown/HTML editor with trusted publication confirmation. It includes
 negative acceptance cases and the distinction between native account delegation
 and a separate Matrix OpenID identity proof for an app's backend.
+It also specifies received-card authentication: each recipient verifies the app,
+continues with their own Matrix account, approves its permissions and, when
+needed, signs into the app backend. Sender grants and sessions never transfer.
 
 That ADR is proposed. This snapshot does not ship a native Octoscript mini-app
 runtime, account bridge or post-editor mini app.

@@ -145,6 +145,89 @@ Identity responses contain only granted fields, such as Matrix user ID, display
 name and avatar reference. Render identity in trusted host chrome when the app
 does not need to receive it. The editor needs no room-history read permission.
 
+## Authentication when another user receives the app
+
+Sharing an app distributes its identity and code, never the sender's login,
+permission grants, app-backend session or private drafts. Every recipient must
+establish their own authenticated context before the app receives account
+access. Being in the same Matrix room, decrypting the card, or trusting its
+sender does not grant the app any authority. The sender may also be different
+from the app's publisher.
+
+The first-use flow is **received card → verified details → Continue with Robrix
+→ recipient consent → optional backend sign-in → open**. Robrix owns the
+account and permission screens outside the mini-app isolate.
+
+| Stage | Required behavior |
+| --- | --- |
+| Receive | Render bounded metadata only. Do not execute the app, contact its backend or request an identity proof. |
+| Inspect | On the user's Open action, verify the package, publisher, exact version/digest and admission status. Show the app's permissions and any backend receiving identity. Refuse unadmitted or withdrawn packages. |
+| Authenticate recipient | If signed out or the Matrix session requires reauthentication, use Robrix's normal password/SSO flow. Otherwise show the existing account as **Continue as @bob:example.org**, with an account-switch option. A valid Matrix login can be reused without asking for the password again. |
+| Authorize app | Show the recipient the requested operations and selected destination. Only explicit consent grants account access. Denial leaves the app without those capabilities; receipt or installation is not consent. |
+| Authenticate backend, if needed | After consent, perform the declared service's identity exchange through the host. Bind the result to this recipient and app. An offline editor skips this stage. |
+| Launch | Create a new recipient-bound instance and scoped storage. Configure the policy and bridge before evaluating source. Publishing still requires the separate final content/destination confirmation. |
+
+Example trusted consent sheet for the post editor:
+
+> **Post Editor — published by OctoSense**
+>
+> Continue as **@bob:example.org**
+>
+> Requested access: display name; this app's drafts; request publication to
+> **Design Group** after you confirm each post.
+>
+> **Cancel** / **Allow and open**
+
+The publisher label comes from verified admission metadata, and the account,
+destination and permission descriptions come from Robrix. They must not come
+from an app-rendered imitation of the consent sheet. Show identity disclosure
+to an external service separately. Translate the host flow through the existing
+English/Chinese catalogs; for example, **使用 Robrix 继续** and **允许并打开**.
+
+Remembered consent is local to the recipient account, installation and approved
+policy. Later opens create fresh instance grants only while that consent,
+account session, version/admission and destination scope remain valid. New
+permissions require new consent. Account changes or a new device require their
+own authentication and local consent; the sender's approval cannot satisfy
+either. Removal or revocation also clears the corresponding backend session.
+
+For example, Alice sends Bob the editor. Bob opens his own instance, sees his
+own drafts, and publishes as Bob to a destination he approves. He cannot see
+Alice's private drafts or publish as Alice. Sharing a particular document or
+collaborative workspace requires an additional invitation/access-control check;
+a mini-app card is not a document-access grant.
+
+### A backend verifies the recipient independently
+
+The app backend must not accept a Matrix user ID supplied in a launch URL or
+JSON object as proof of login. A proposed host-mediated exchange is:
+
+1. Robrix selects the backend registered for the admitted app. It starts a
+   short-lived login transaction bound to the app, destination service and
+   recipient instance; arbitrary destinations from a chat card are rejected.
+2. After recipient consent, Robrix requests an OpenID proof from that user's
+   Matrix homeserver using the host-owned Matrix session. It transmits the
+   proof only to the approved backend over authenticated HTTPS.
+3. The backend validates the proof with the indicated homeserver's OpenID
+   userinfo API using validated Matrix server discovery. Its verifier must
+   defend against attacker-selected discovery destinations and redirects. The
+   verified `sub`, not a client-supplied account name, identifies the user. The
+   host checks that it matches the account bound to the pending transaction.
+4. The backend consumes its login transaction once and issues its own limited
+   app session. Robrix binds and stores that session on the host side; the
+   isolate receives only the authorized bridge and necessary non-secret data.
+   Refresh, logout and revocation belong to this recipient's session.
+
+These are proposed application-protocol steps, not a new Matrix endpoint.
+Matrix OpenID itself has no app audience or challenge binding and does not
+guarantee one-time use. A nonce in our transaction cannot turn the underlying
+bearer proof into an audience-bound credential. Keep the proof in trusted
+transport, validate the recipient service, bound transaction lifetimes and
+consume the app exchange once. Stronger proof requirements need a separately
+reviewed identity protocol. Different homeservers can participate if the backend
+supports their discovery and verification; unsupported or failed authentication
+must leave backend access disabled.
+
 ## Editor capabilities and workflow
 
 The following names are a **proposed Robrix API**, not existing Octoscript or
@@ -235,6 +318,13 @@ room leave or power-level change; altered content after preview; replayed
 approval; duplicate send/retry; mutated or withdrawn bundles; policy-less
 launch; instruction/heap exhaustion; HTML/script/URL injection; network through
 artwork or redirects; and an agent attempting to approve its own publication.
+Recipient acceptance additionally covers Alice → Bob → Carol forwarding with
+independent grants and drafts; signed-out first use; an already signed-in
+recipient; account switching during consent; denied consent; unsupported or
+failed backend authentication; forged user IDs; replayed backend exchanges;
+permission escalation on update; and a shared document without an invitation.
+No backend request or identity disclosure may occur merely because a card was
+received or displayed.
 Successful UI/profile checks alone do not establish OS isolation or a WeChat
 visual similarity score.
 
