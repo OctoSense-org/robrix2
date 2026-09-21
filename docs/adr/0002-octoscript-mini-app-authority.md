@@ -1,12 +1,15 @@
 # ADR 0002: Octoscript mini apps and delegated Matrix authority
 
 - Date: 2026-09-20
-- Status: Proposed
-- Implementation: source review and design only. The development branch includes
-  the existing web mini apps, WeChat-style UI, Moments and Hagency work. It does
-  not yet include a contained Octoscript host or a post-editor mini app.
+- Status: Accepted for the built-in L0 article editor; broader runtime/catalog design remains proposed
+- Implementation: `src/article_app` provides an admitted built-in Octoscript L0
+  Markdown editor, native Makepad Html preview, recipient account consent, local
+  per-account drafts and host-confirmed Matrix publication. See
+  [implementation and validation](../../lab/article-editor/README.md).
+  General remote package signatures, arbitrary Splash execution and external
+  mini-app backend identity exchange are not implemented.
 - First application: a native Markdown/HTML post editor, opened from a chat or
-  Discover → Mini Apps, with local drafts, preview and explicit publication.
+  Discover → Article editor, with local drafts, preview and explicit publication.
 
 ## Decision
 

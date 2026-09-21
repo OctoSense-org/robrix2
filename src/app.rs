@@ -27,6 +27,7 @@ use crate::shared::file_upload_modal::{FileUploadModalWidgetRefExt, FileUploadMo
 #[cfg(feature = "agent_chat")]
 use crate::agent_chat::ops::ui::{AgentOpsAction, AgentOpsPanelWidgetRefExt};
 use crate::moments::ui::{MomentsAction, MomentsPanelWidgetRefExt};
+use crate::article_app::{ArticleAction, ArticlePanelWidgetRefExt};
 use crate::mini_app::{MiniAppAction, MiniAppPanelWidgetRefExt};
 use crate::forwarding::{ForwardAction, ForwardPanelWidgetRefExt};
 use crate::home::room_history::{RoomHistoryAction, RoomHistoryPanelWidgetRefExt};
@@ -151,6 +152,7 @@ script_mod! {
                             content := FileUploadModal {}
                         }
 
+                        article_app_modal := Modal {can_dismiss: false content := ArticlePanel {}}
                         mini_app_modal := Modal {
                             can_dismiss: false
                             content := MiniAppPanel {}
@@ -322,6 +324,8 @@ impl MatchEvent for App {
                         let modal = self.ui.modal(cx, ids!(agent_ops_modal));
                         self.ui.agent_ops_panel(cx, ids!(agent_ops_modal.content)).action(cx, modal, &AgentOpsAction::Close);
                     }
+                    let modal = self.ui.modal(cx, ids!(article_app_modal));
+                    self.ui.article_panel(cx, ids!(article_app_modal.content)).action(cx, modal, &ArticleAction::Close);
                     // Clear and reset all app state to its default.
                     clear_all_app_state(cx);
                     self.ui.modal(cx, ids!(verification_modal)).close(cx);
@@ -347,6 +351,9 @@ impl MatchEvent for App {
             // by `handle_session_changes`), navigate back to the login screen.
             // When not yet logged in, the login_screen widget handles displaying the failure modal.
             if let Some(LoginAction::LoginFailure(_)) = action.downcast_ref() {
+                crate::article_app::invalidate_sessions();
+                let modal = self.ui.modal(cx, ids!(article_app_modal));
+                self.ui.article_panel(cx, ids!(article_app_modal.content)).action(cx, modal, &ArticleAction::Close);
                 if self.app_state.logged_in {
                     log!("Received LoginAction::LoginFailure while logged in; showing login screen.");
                     self.app_state.logged_in = false;
@@ -374,6 +381,11 @@ impl MatchEvent for App {
             if let Some(action) = action.downcast_ref::<ForwardAction>() {
                 let modal = self.ui.modal(cx, ids!(forward_modal));
                 self.ui.forward_panel(cx, ids!(forward_modal.content)).action(cx, modal, action);
+                continue;
+            }
+            if let Some(action) = action.downcast_ref::<ArticleAction>() {
+                let modal = self.ui.modal(cx, ids!(article_app_modal));
+                self.ui.article_panel(cx, ids!(article_app_modal.content)).action(cx, modal, action);
                 continue;
             }
             if let Some(action) = action.downcast_ref::<MiniAppAction>() {
@@ -798,6 +810,7 @@ impl AppMain for App {
         makepad_code_editor::script_mod(vm);
         crate::shared::script_mod(vm);
         crate::mini_app::script_mod(vm);
+        crate::article_app::script_mod(vm);
         crate::forwarding::script_mod(vm);
 
         #[cfg(feature = "tsp")]

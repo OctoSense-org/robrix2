@@ -2,7 +2,7 @@
 //! of events (messages，state changes, etc.), along with an input bar at the bottom.
 
 use std::{borrow::Cow, cell::RefCell, ops::{DerefMut, Range}, sync::Arc};
-use crate::mini_app::{MiniAppCardWidgetRefExt, WebMiniApp};
+use crate::mini_app::{MiniAppCardWidgetRefExt, SharedMiniApp};
 use crate::forwarding::{ForwardAction, ForwardBundle, ForwardCardWidgetRefExt, ForwardMessage};
 
 use hashbrown::{HashMap, HashSet};
@@ -1958,6 +1958,7 @@ impl RoomScreen {
             RoomInputPopupMenuAction::SendCurrentLocation => {
                 room_input_bar.show_current_location_preview(cx);
             }
+            RoomInputPopupMenuAction::ArticleEditor => cx.action(crate::article_app::ArticleAction::Open),
             RoomInputPopupMenuAction::ShareMiniApp => {
                 if let Some(timeline) = self.timeline_kind.clone() {
                     cx.action(crate::mini_app::MiniAppAction::Compose(timeline));
@@ -4735,18 +4736,18 @@ fn populate_message_view(
                     new_drawn_status.content_drawn = true;
                     (item, false)
                 }
-                message if message.msgtype() == crate::mini_app::MSGTYPE => {
+                message if matches!(message.msgtype(), crate::mini_app::MSGTYPE | crate::article_app::MSGTYPE) => {
                     has_html_body = false;
                     let template = if mobile {
                         if event_tl_item.is_own() { id!(MobileOwnMiniAppMessage) } else { id!(MobileMiniAppMessage) }
                     } else { id!(MiniAppMessage) };
                     let (item, _) = list.item_with_existed(cx, item_id, template);
                     item.link_preview(cx, ids!(content.link_preview_view)).clear(cx);
-                    match WebMiniApp::from_message(message) {
+                    match SharedMiniApp::from_message(message) {
                         Ok(app) => { web_mini_app = Some(app); }
                         Err(_) => {
                             let content = item.html_or_plaintext(cx, ids!(content.message));
-                            populate_text_message_content(cx, &content, "This mini-app card has an unsupported or invalid web address.", None, None, None, None, None);
+                            populate_text_message_content(cx, &content, crate::i18n::tr("This mini-app card is unsupported or invalid."), None, None, None, None, None);
                         }
                     }
                     new_drawn_status.content_drawn = true;

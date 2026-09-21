@@ -74,10 +74,13 @@ matrix-sdk-ui = { git = "https://github.com/matrix-org/matrix-rust-sdk", default
 ##
 ## Note: we actually patch this below to use our `tsp` branch instead.
 ruma = { git = "https://github.com/ruma/ruma", rev = "0908aaa9847093ecb32bc6edf0af525f726717fd", features = [
+    "html-matrix",
     "compat-optional",
     "compat-unset-avatar",
     "unstable-compat-lax-syncv5-deser",
 ] }
+octoscript-ui-l0 = { git = "https://github.com/OctoSense-org/Octoscript", rev = "86a51a30767da5bf1f2e87559730f8539300b5d0" }
+blake3 = "1.8"
 num_cpus = "1.17.0"
 rand = "0.8.5"
 rangemap = "1.5.0"

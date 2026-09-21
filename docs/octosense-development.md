@@ -52,5 +52,9 @@ It also specifies received-card authentication: each recipient verifies the app,
 continues with their own Matrix account, approves its permissions and, when
 needed, signs into the app backend. Sender grants and sessions never transfer.
 
-That ADR is proposed. This snapshot does not ship a native Octoscript mini-app
-runtime, account bridge or post-editor mini app.
+The built-in L0 article editor slice is now implemented. See
+[the article-editor flow and validation](../lab/article-editor/README.md) for
+source admission, recipient consent, native Markdown/Html rendering and Matrix
+publishing. The broader arbitrary-app catalog/runtime and external backend
+identity exchange remain proposed. The snapshot counts above describe the
+initial fork; current article-editor test evidence is recorded with that flow.

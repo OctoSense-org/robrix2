@@ -165,6 +165,8 @@ script_mod! {
             discover := ScrollYView {
                 width: Fill height: Fill flow: Down spacing: 8
                 mod.widgets.MobileSection {
+                    discover_article := mod.widgets.MobileRow {title.text: #(crate::i18n::tr("Article editor")) title.i18n_text: "Article editor" icon.draw_icon.svg: ICON_ADD_ATTACHMENT}
+                    mod.widgets.MobileDivider {}
                     discover_moments := mod.widgets.MobileRow {title.text: #(crate::i18n::tr("Moments")) title.i18n_text: "Moments" icon.draw_icon.svg: ICON_GLOBE}
                     mod.widgets.MobileDivider {}
                     explore := mod.widgets.MobileRow {title.text: #(crate::i18n::tr("Explore Groups & Spaces")) title.i18n_text: "Explore Groups & Spaces" icon.draw_icon.svg: ICON_GLOBE}
@@ -487,6 +489,7 @@ impl Widget for MobileHub {
             if self.view.button(cx, ids!(title_bar.controls.left)).clicked(actions) {
                 self.back(cx);
             }
+            if self.view.navigation_bar_button(cx, ids!(discover_article)).clicked(actions) { cx.action(crate::article_app::ArticleAction::Open); }
             if self.view.navigation_bar_button(cx, ids!(discover_moments)).clicked(actions) {
                 cx.action(crate::moments::ui::MomentsAction::Open {author: None});
             }

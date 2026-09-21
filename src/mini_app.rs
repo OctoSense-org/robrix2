@@ -1,4 +1,4 @@
-//! Shareable web mini apps carried by Matrix, opened in Makepad's native WebKit view.
+//! Matrix mini-app cards: native article packages and separate WebKit link apps.
 
 use makepad_widgets::*;
 use ruma::{
@@ -25,7 +25,7 @@ pub fn is_timeline_event(event: &ruma::events::AnySyncTimelineEvent) -> bool {
         return false;
     };
     event.original_content().is_some_and(|content| matches!(content,
-        ruma::events::AnyMessageLikeEventContent::RoomMessage(message) if message.msgtype.msgtype() == MSGTYPE))
+        ruma::events::AnyMessageLikeEventContent::RoomMessage(message) if matches!(message.msgtype.msgtype(), MSGTYPE | crate::article_app::MSGTYPE)))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,6 +98,19 @@ impl WebMiniApp {
             .map(|url| url.origin().ascii_serialization())
             .unwrap_or_default()
     }
+}
+
+/// Shared native packages and web cards keep distinct launch paths.
+#[derive(Clone, Debug)]
+pub enum SharedMiniApp { Web(WebMiniApp), Article(crate::article_app::ArticlePackage) }
+impl SharedMiniApp {
+    pub fn from_message(message: &MessageType) -> Result<Self, String> {
+        if message.msgtype() == crate::article_app::MSGTYPE {
+            crate::article_app::ArticlePackage::from_message(message).map(Self::Article)
+        } else { WebMiniApp::from_message(message).map(Self::Web) }
+    }
+    pub fn title(&self) -> &str { match self {Self::Web(app)=>&app.title, Self::Article(_)=>crate::i18n::tr("Article editor")} }
+    fn origin(&self) -> String {match self {Self::Web(app)=>app.origin(),Self::Article(_)=>crate::i18n::tr("Markdown · Native preview").into()}}
 }
 
 #[derive(Clone, Debug)]
@@ -209,7 +222,7 @@ pub struct MiniAppCard {
     #[deref]
     view: View,
     #[rust]
-    app: Option<WebMiniApp>,
+    app: Option<SharedMiniApp>,
     #[rust]
     timeline: Option<TimelineKind>,
 }
@@ -229,10 +242,10 @@ impl Widget for MiniAppCard {
                 .clicked(actions)
             {
                 if let (Some(app), Some(timeline)) = (&self.app, &self.timeline) {
-                    cx.action(MiniAppAction::Open {
-                        app: app.clone(),
-                        timeline: timeline.clone(),
-                    });
+                    match app {
+                        SharedMiniApp::Web(app) => cx.action(MiniAppAction::Open { app: app.clone(), timeline: timeline.clone() }),
+                        SharedMiniApp::Article(_) => cx.action(crate::article_app::ArticleAction::Open),
+                    }
                 }
             }
         }
@@ -240,13 +253,13 @@ impl Widget for MiniAppCard {
 }
 
 impl MiniAppCardRef {
-    pub fn set_app(&self, cx: &mut Cx, app: Option<WebMiniApp>, timeline: &TimelineKind) {
+    pub fn set_app(&self, cx: &mut Cx, app: Option<SharedMiniApp>, timeline: &TimelineKind) {
         let Some(mut inner) = self.borrow_mut() else {
             return;
         };
         inner.visible = app.is_some();
         if let Some(app) = &app {
-            inner.label(cx, ids!(card_title)).set_text(cx, &app.title);
+            inner.label(cx, ids!(card_title)).set_text(cx, app.title());
             inner
                 .label(cx, ids!(card_origin))
                 .set_text(cx, &app.origin());

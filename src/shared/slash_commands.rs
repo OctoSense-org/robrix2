@@ -322,7 +322,7 @@ pub(crate) fn split_command(text: &str) -> Option<(&str, &str)> {
 ///
 /// This is what notifications and room previews show, so tags that break a line
 /// become newlines, and markup that becomes nothing just uses the raw HTML as fallback.
-fn html_to_plaintext(html: &str) -> String {
+pub(crate) fn html_to_plaintext(html: &str) -> String {
     /// Tags we turn into a line break, so "a<br/>b" doesn't come out as "ab".
     const BREAKING_TAGS: &[&str] = &["br", "p", "li", "div", "tr", "blockquote", "h1", "h2", "h3"];
 

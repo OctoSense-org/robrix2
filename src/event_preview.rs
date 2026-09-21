@@ -280,9 +280,9 @@ fn text_preview_of_message(
                 htmlize::escape_text(&video.body)
             }
         ),
-        message if message.msgtype() == crate::mini_app::MSGTYPE => {
-            crate::mini_app::WebMiniApp::from_message(message)
-                .map(|app| format!("[Mini app] {}", htmlize::escape_text(&app.title)))
+        message if matches!(message.msgtype(), crate::mini_app::MSGTYPE | crate::article_app::MSGTYPE) => {
+            crate::mini_app::SharedMiniApp::from_message(message)
+                .map(|app| format!("[Mini app] {}", htmlize::escape_text(app.title())))
                 .unwrap_or_else(|_| "[Mini app] Unsupported card".into())
         }
         MessageType::_Custom(custom) => {

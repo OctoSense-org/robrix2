@@ -82,6 +82,10 @@ script_mod! {
                 draw_icon.svg: (ICON_LOCATION_PIN)
                 text: #(crate::i18n::tr("Send current location")) i18n_text: "Send current location"
             }
+            article_editor_button := mod.widgets.RoomInputPopupMenuButton {
+                draw_icon.svg: (ICON_ADD_ATTACHMENT)
+                text: #(crate::i18n::tr("Article editor")) i18n_text: "Article editor"
+            }
             share_mini_app_button := mod.widgets.RoomInputPopupMenuButton {
                 draw_icon.svg: (ICON_ADD_ATTACHMENT)
                 text: #(crate::i18n::tr("Share mini app")) i18n_text: "Share mini app"
@@ -103,6 +107,7 @@ pub enum RoomInputPopupMenuAction {
     /// Emitted by the RoomInputPopupMenu when the send location button is clicked.
     SendCurrentLocation,
     ShareMiniApp,
+    ArticleEditor,
     #[default]
     None,
 }
@@ -147,6 +152,8 @@ impl WidgetMatchEvent for RoomInputPopupMenu {
             RoomInputPopupMenuAction::UploadFile
         } else if self.button(cx, ids!(send_location_button)).clicked(actions) {
             RoomInputPopupMenuAction::SendCurrentLocation
+        } else if self.button(cx, ids!(article_editor_button)).clicked(actions) {
+            RoomInputPopupMenuAction::ArticleEditor
         } else if self.button(cx, ids!(share_mini_app_button)).clicked(actions) {
             RoomInputPopupMenuAction::ShareMiniApp
         } else {
