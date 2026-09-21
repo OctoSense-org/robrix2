@@ -40,6 +40,9 @@ ui.blitz_article_view(cx, ids!(article_preview)).set_rendered(cx, &bitmap);
 ui.blitz_article_view(cx, ids!(article_preview)).clear(cx);
 ```
 
+For a `Widget`/`RefMut<Widget>` receiver rather than a `WidgetRef`, import
+`BlitzArticleViewWidgetExt` instead.
+
 The adapter converts RGBA to Makepad's `VecBGRAu8_32`, displays the result in a clipped native scroll view, and has no WebView. Makepad is pinned to `47837267faf6970a6cc36acedf9f83846b277307` in this crate's lockfile, using the same source/branch as Robrix to avoid duplicate widget types. Hosts should render at the measured view width and current DPI; changing the view width only scales the existing bitmap until the host renders again.
 
 This adapter supplies a bitmap preview, not text selection, link hit testing, accessibility text or editing. Keep the native editable view available. Its CPU bitmap allocation, upload and full-document rendering costs make it a first integration, not the final interactive renderer.

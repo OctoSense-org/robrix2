@@ -935,5 +935,14 @@
   "Invalid cover crop": "封面裁剪参数无效",
   "Invalid text selection": "文字选区无效",
   "This chat is not available.": "此聊天暂时不可用。",
-  "Chat encryption changed. Review the publication again.": "聊天的加密设置已变化，请重新审阅后发表。"
+  "Chat encryption changed. Review the publication again.": "聊天的加密设置已变化，请重新审阅后发表。",
+  "HTML/CSS preview (experimental)": "HTML/CSS 排版预览（实验）",
+  "Static layout preview. Return to the native view to edit, select text or open links.": "静态排版预览。编辑、选择文字或打开链接，请返回原生视图。",
+  "Refresh preview": "刷新预览",
+  "Preview reached its length limit. Return to Full preview to read the entire article.": "预览已达到长度限制，请返回全文预览阅读完整文章。",
+  "HTML/CSS preview ready": "HTML/CSS 排版预览已就绪",
+  "Rendering HTML/CSS preview…": "正在生成 HTML/CSS 排版预览…",
+  "Unable to render HTML/CSS preview.": "无法生成 HTML/CSS 排版预览。",
+  "Another article preview is still rendering.": "另一篇文章仍在生成预览，请稍后重试。",
+  "This operation was not authorized.": "此操作尚未获得授权。"
 }

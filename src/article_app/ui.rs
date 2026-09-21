@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use article_core::editing::EditHistory;
+#[cfg(feature = "article_blitz")]
+use article_blitz::makepad::BlitzArticleViewWidgetExt;
 use makepad_widgets::*;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use crate::{
@@ -39,6 +41,7 @@ enum Page {
     Theme,
     Cover,
     Preview,
+    CssPreview,
     Review,
     Rooms,
     Confirm,
@@ -48,6 +51,12 @@ enum Page {
 }
 #[derive(Clone, Debug)]
 enum ResultAction {
+    #[cfg(feature = "article_blitz")]
+    CssPreview {
+        instance: String,
+        request: String,
+        result: Result<std::sync::Arc<article_blitz::RenderedArticle>, String>,
+    },
     Image {
         instance: String,
         document: String,
@@ -283,7 +292,13 @@ script_mod! {
                 }
             }
             preview_stats := mod.widgets.ArticleLabel {draw_text +: {color: #x888888 text_style: theme.font_regular{font_size: 11}}}
+            css_preview_open := mod.widgets.ArticleButton {width: Fill visible: #(cfg!(feature = "article_blitz")) text: #(crate::i18n::tr("HTML/CSS preview (experimental)")) i18n_text: "HTML/CSS preview (experimental)"}
             preview_check := mod.widgets.ArticlePrimary {text: #(crate::i18n::tr("Publication review")) i18n_text: "Publication review"}
+        }
+        css_preview := View {visible: false width: Fill height: Fill flow: Down padding: 20 spacing: 10
+            mod.widgets.ArticleLabel {text: #(crate::i18n::tr("Static layout preview. Return to the native view to edit, select text or open links.")) i18n_text: "Static layout preview. Return to the native view to edit, select text or open links."}
+            css_preview_refresh := mod.widgets.ArticleButton {text: #(crate::i18n::tr("Refresh preview")) i18n_text: "Refresh preview"}
+            css_preview_bitmap := mod.widgets.BlitzArticleView {}
         }
         review := ScrollYView {visible: false width: Fill height: Fill flow: Down padding: 24 spacing: 20
             review_title := mod.widgets.ArticleLabel {draw_text.text_style: theme.font_bold{font_size: 22}}
@@ -366,6 +381,10 @@ pub struct ArticlePanel {
     #[rust]
     history: EditHistory,
     #[rust]
+    viewport_width: f64,
+    #[rust]
+    css_request: String,
+    #[rust]
     pending: bool,
     #[rust]
     dirty: bool,
@@ -397,6 +416,31 @@ pub struct ArticlePanel {
     remote_article: Option<ArticleContent>,
 }
 impl ArticlePanel {
+    #[cfg(feature = "article_blitz")]
+    fn start_css_preview(&mut self, cx: &mut Cx) {
+        if !self.editable() || self.pending { return; }
+        let Some(grant) = self.grant.clone() else { return; };
+        let area = self.portal_list(cx, ids!(article_reader)).area();
+        let options = article_blitz::RenderOptions {
+            width_css: (self.viewport_width - 40.0).clamp(64.0, 2048.0) as u32,
+            scale: (cx.get_dpi_factor_of(&area) as f32).clamp(1.0, 2.0),
+            max_height_css: 8192,
+            ..Default::default()
+        };
+        self.css_request = new_id();
+        let request = self.css_request.clone();
+        let instance = grant.instance.clone();
+        let document = self.doc.clone();
+        self.pending = true;
+        self.show(cx, Page::CssPreview);
+        self.blitz_article_view(cx, ids!(css_preview_bitmap)).clear(cx);
+        self.status(cx, "Rendering HTML/CSS preview…");
+        spawn_async_task(async move {
+            let result = tokio::task::spawn_blocking(move || super::preview::render(document, grant, options))
+                .await.map_err(|_| "Unable to render HTML/CSS preview.".to_string()).and_then(|r|r);
+            Cx::post_action(ResultAction::CssPreview { instance, request, result });
+        });
+    }
     fn status(&self, cx: &mut Cx, s: &str) {
         self.label(cx, ids!(article_status)).set_text(cx, tr(s));
     }
@@ -508,6 +552,7 @@ impl ArticlePanel {
             (id!(themes), Page::Theme),
             (id!(cover), Page::Cover),
             (id!(preview), Page::Preview),
+            (id!(css_preview), Page::CssPreview),
             (id!(review), Page::Review),
             (id!(rooms), Page::Rooms),
             (id!(confirm), Page::Confirm),
@@ -531,6 +576,7 @@ impl ArticlePanel {
             Page::Theme => "Article style",
             Page::Cover => "Cover and summary",
             Page::Preview => "Full preview",
+            Page::CssPreview => "HTML/CSS preview (experimental)",
             Page::Review => "Publication review",
             Page::Rooms => "Choose chat",
             Page::Confirm => {
@@ -556,6 +602,7 @@ impl ArticlePanel {
             .set_visible(cx, page == Page::Edit);
         self.button(cx, ids!(preview_check))
             .set_visible(cx, page == Page::Preview && !self.reader_only);
+        self.button(cx, ids!(css_preview_open)).set_visible(cx, cfg!(feature = "article_blitz") && page == Page::Preview && !self.reader_only);
         self.status(cx, "");
         self.refresh_document(cx);
         self.view.redraw(cx);
@@ -1031,7 +1078,7 @@ impl ArticlePanel {
         self.load_cover(cx, ids!(publication_cover), false);
     }
     fn back(&mut self, cx: &mut Cx) {
-        if self.pending {
+        if self.pending && self.page != Page::CssPreview {
             return;
         }
         match self.page {
@@ -1045,6 +1092,13 @@ impl ArticlePanel {
                 }
             }
             Page::Source => self.show(cx, Page::Edit),
+            Page::CssPreview => {
+                self.pending = false;
+                self.css_request.clear();
+                #[cfg(feature = "article_blitz")]
+                self.blitz_article_view(cx, ids!(css_preview_bitmap)).clear(cx);
+                self.show(cx, Page::Preview);
+            },
             Page::Confirm => {
                 self.load_library(cx);
                 self.show(cx, Page::Library);
@@ -1095,6 +1149,8 @@ impl Widget for ArticlePanel {
                     continue;
                 };
                 let instance = match result {
+                    #[cfg(feature = "article_blitz")]
+                    ResultAction::CssPreview { instance, .. } => instance,
                     ResultAction::Image { instance, .. }
                     | ResultAction::Published { instance, .. }
                     | ResultAction::Shared { instance, .. }
@@ -1105,6 +1161,20 @@ impl Widget for ArticlePanel {
                     continue;
                 }
                 match result {
+                    #[cfg(feature = "article_blitz")]
+                    ResultAction::CssPreview { request, result, .. } => {
+                        if *request != self.css_request || self.page != Page::CssPreview || !self.allowed() { continue; }
+                        self.pending = false;
+                        match result {
+                            Ok(bitmap) => {
+                                self.blitz_article_view(cx, ids!(css_preview_bitmap)).set_rendered(cx, bitmap);
+                                self.status(cx, if bitmap.clipped {
+                                    "Preview reached its length limit. Return to Full preview to read the entire article."
+                                } else { "HTML/CSS preview ready" });
+                            }
+                            Err(error) => self.status(cx, error),
+                        }
+                    }
                     ResultAction::Image {
                         document,
                         cover,
@@ -1201,6 +1271,12 @@ impl Widget for ArticlePanel {
                 return;
             }
             if self.pending {
+                return;
+            }
+            #[cfg(feature = "article_blitz")]
+            if (self.page == Page::Preview && self.button(cx, ids!(css_preview_open)).clicked(actions))
+                || (self.page == Page::CssPreview && self.button(cx, ids!(css_preview_refresh)).clicked(actions)) {
+                self.start_css_preview(cx);
                 return;
             }
             if self.page == Page::Details
@@ -1878,6 +1954,7 @@ impl Widget for ArticlePanel {
     }
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         let available = cx.turtle().inner_rect().size.x;
+        self.viewport_width = available;
         let wide = available >= 960.0;
         let paper_width = if wide {
             Size::Fixed((available - 490.0).min(760.0))
@@ -2124,6 +2201,9 @@ impl ArticlePanelRef {
                 if let Some(g) = panel.grant.take() {
                     g.revoke()
                 }
+                panel.css_request.clear();
+                #[cfg(feature = "article_blitz")]
+                panel.blitz_article_view(cx, ids!(css_preview_bitmap)).clear(cx);
                 panel.active = true;
                 panel.owner = current_user_id();
                 panel.reader_only = matches!(action, ArticleAction::Read { .. });
@@ -2163,6 +2243,9 @@ impl ArticlePanelRef {
                 if let Some(g) = panel.grant.take() {
                     g.revoke()
                 }
+                panel.css_request.clear();
+                #[cfg(feature = "article_blitz")]
+                panel.blitz_article_view(cx, ids!(css_preview_bitmap)).clear(cx);
                 panel.active = false;
                 panel.pending = false;
                 panel.owner = None;

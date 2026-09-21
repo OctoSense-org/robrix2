@@ -24,9 +24,18 @@ Split reusable Rust libraries from host orchestration:
   picker, consent UI, Matrix wire format, target selection, E2EE media,
   publication retries, replacement events and withdrawal. Robrix supplies
   `RobrixArticleHost` and `RobrixPublisher` to the shared code.
-- `article-blitz`: separately validated, optional HTML/CSS rendering candidate.
+- `article-blitz`: separately validated, optional HTML/CSS preview renderer.
   Rendering arbitrary HTML does not make the v2 structured editor an arbitrary
   HTML WYSIWYG editor. The document schema is not expanded by this extraction.
+
+Robrix exposes the renderer through the optional `article_blitz` Cargo feature.
+The adapter generates HTML from a validated document, builds a fresh resource
+map from grant-checked assets, renders on a worker and rechecks the grant,
+instance and preview request before displaying a native Makepad texture. The
+editor, full native reader and publication path remain available. A clipped
+bitmap is explicitly identified and the user can return to the full reader.
+The renderer has no WebView, JavaScript engine, network transport or document-
+controlled file access. It is not a sandbox for arbitrary hostile CSS.
 
 Each application links the components into its own executable. A reusable code
 library is not a running service or an OctoSense installation requirement.

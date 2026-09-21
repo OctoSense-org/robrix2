@@ -108,7 +108,15 @@ class NativeApp:
     def wait_text(self, text, timeout=20, pixels=False):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            found = text in " ".join(row["text"] for row in self.ocr()) if pixels else any(text in (w.get("t") or "") for w in self.snap())
+            try:
+                found = text in " ".join(row["text"] for row in self.ocr()) if pixels else any(text in (w.get("t") or "") for w in self.snap())
+            except urllib.error.HTTPError as error:
+                # The bridge can report a window before its first draw has
+                # produced a snapshot. Retry only that transient response.
+                if error.code != 404:
+                    raise
+                time.sleep(.25)
+                continue
             if found:
                 self.trace.append({"assert": "visible_text", "text": text, "passed": True, "at": time.time()})
                 return

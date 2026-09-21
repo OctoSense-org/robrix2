@@ -935,5 +935,14 @@
   "Invalid cover crop": "Invalid cover crop",
   "Invalid text selection": "Invalid text selection",
   "This chat is not available.": "This chat is not available.",
-  "Chat encryption changed. Review the publication again.": "Chat encryption changed. Review the publication again."
+  "Chat encryption changed. Review the publication again.": "Chat encryption changed. Review the publication again.",
+  "HTML/CSS preview (experimental)": "HTML/CSS preview (experimental)",
+  "Static layout preview. Return to the native view to edit, select text or open links.": "Static layout preview. Return to the native view to edit, select text or open links.",
+  "Refresh preview": "Refresh preview",
+  "Preview reached its length limit. Return to Full preview to read the entire article.": "Preview reached its length limit. Return to Full preview to read the entire article.",
+  "HTML/CSS preview ready": "HTML/CSS preview ready",
+  "Rendering HTML/CSS preview…": "Rendering HTML/CSS preview…",
+  "Unable to render HTML/CSS preview.": "Unable to render HTML/CSS preview.",
+  "Another article preview is still rendering.": "Another article preview is still rendering.",
+  "This operation was not authorized.": "This operation was not authorized."
 }

@@ -30,3 +30,7 @@ Known boundaries:
 - Long documents beyond the bitmap budget are explicitly reported as clipped; the host must display that condition. Tiled rendering is future work.
 
 Reproduction commands and the host API are in `crates/article-blitz/README.md`. No personal Matrix credentials, profiles or accounts were used.
+
+Robrix's optional `article_blitz` feature now uses this renderer for validated
+local draft previews. Its integration checks, Palpo lifecycle checks and actual
+Robrix screenshots are recorded separately in `lab/article-components/`.
