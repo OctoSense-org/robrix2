@@ -14,6 +14,8 @@ version = "1.0.0-beta.1"
 metadata.makepad-auto-version = "zqpv-Yj-K7WNVK2I8h5Okhho46Q="
 
 [dependencies]
+article-core = { path = "crates/article-core", features = ["l0"] }
+article-makepad = { path = "crates/article-makepad" }
 # makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev", features = ["serde"] }
 # makepad-code-editor = { git = "https://github.com/makepad/makepad", branch = "dev" }
 
@@ -82,7 +84,6 @@ ruma = { git = "https://github.com/ruma/ruma", rev = "0908aaa9847093ecb32bc6edf0
     "compat-unset-avatar",
     "unstable-compat-lax-syncv5-deser",
 ] }
-octoscript-ui-l0 = { git = "https://github.com/OctoSense-org/Octoscript", rev = "86a51a30767da5bf1f2e87559730f8539300b5d0" }
 blake3 = "1.8"
 num_cpus = "1.17.0"
 rand = "0.8.5"

@@ -231,6 +231,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "article-core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "image",
+ "octoscript-ui-l0",
+ "pulldown-cmark 0.13.0",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "unicode-segmentation 1.13.3",
+ "url",
+]
+
+[[package]]
+name = "article-makepad"
+version = "0.1.0"
+dependencies = [
+ "article-core",
+ "libc",
+ "makepad-widgets",
+ "unicode-segmentation 1.13.3",
+]
+
+[[package]]
 name = "as_variant"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5625,6 +5650,8 @@ name = "robrix"
 version = "1.0.0-beta.1"
 dependencies = [
  "anyhow",
+ "article-core",
+ "article-makepad",
  "aws-lc-rs",
  "base64 0.22.1",
  "bitflags 2.13.1",
@@ -5656,7 +5683,6 @@ dependencies = [
  "mime",
  "mime_guess",
  "num_cpus",
- "octoscript-ui-l0",
  "percent-encoding",
  "pulldown-cmark 0.13.0",
  "quinn",

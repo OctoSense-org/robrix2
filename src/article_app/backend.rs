@@ -1,5 +1,6 @@
 //! Matrix article operations. The host owns identity, media and confirmation.
 use std::collections::{BTreeMap, BTreeSet};
+use article_core::host::Capability;
 use matrix_sdk::{
     Client, Room, RoomState,
     config::RequestConfig,
@@ -174,6 +175,7 @@ pub(super) async fn writable(
     id: &ruma::RoomId,
 ) -> Result<Room, String> {
     guard(client, grant)?;
+    grant.authorize(Capability::Publish)?;
     let room = client
         .get_room(id)
         .ok_or("This chat is no longer joined.")?;
@@ -312,6 +314,7 @@ pub async fn execute(
 ) -> Result<Publication, String> {
     let _lock = WRITES.lock().await;
     guard(&client, &grant)?;
+    grant.authorize(Capability::Publish)?;
     let library = storage::load(crate::app_data_dir(), &grant)?;
     if let Some(previous) = library.outbox.iter().find(|o| o.id == op.id) {
         op = previous.clone();
@@ -556,6 +559,7 @@ pub async fn read_article(
     event_id: OwnedEventId,
 ) -> Result<ArticleContent, String> {
     guard(&client, &grant)?;
+    grant.authorize(Capability::ReadPublished)?;
     let room = client
         .get_room(&room_id)
         .ok_or("This chat is not available.")?;
@@ -589,6 +593,7 @@ pub async fn download_image(
 ) -> Result<Vec<u8>, String> {
     use std::io::Read;
     guard(&client, &grant)?;
+    grant.authorize(Capability::ReadPublished)?;
     if asset.asset.bytes == 0 || asset.asset.bytes > storage::MAX_FILE {
         return Err("Invalid article image".into());
     }

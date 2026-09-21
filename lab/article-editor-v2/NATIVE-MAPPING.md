@@ -7,7 +7,7 @@ Each scene has `robrix-mapping.json` linking source intent to real Makepad widge
 Runtime modules:
 - `document.rs`: bounded structured document, Unicode marks, Markdown interchange and safe HTML.
 - `rich_input.rs` / `rich_layout.rs`: pinned native input implementation and shared mixed-face layout for display, selection and caret.
-- `model.rs` and `resources/mini_apps/article-editor/app.card`: actual bounded L0 title/source realization and setter dispatch; builtin package identity and per-open grant.
+- `model.rs` and `crates/article-core/resources/app.card`: actual bounded L0 title/source realization and setter dispatch; builtin package identity and per-open grant.
 - `storage.rs`: per-account atomic document, media and resumable operation storage.
 - `backend.rs`: host-only Matrix identity, encrypted media, durable publish/update/redaction operations and bounded native reader downloads.
 - `ui.rs`: navigation, native widgets, review and explicit confirmations.

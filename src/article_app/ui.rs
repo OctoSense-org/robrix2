@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use article_core::editing::EditHistory;
 use makepad_widgets::*;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedUserId};
 use crate::{
@@ -363,9 +364,7 @@ pub struct ArticlePanel {
     #[rust]
     active_block: usize,
     #[rust]
-    undo: Vec<Document>,
-    #[rust]
-    redo: Vec<Document>,
+    history: EditHistory,
     #[rust]
     pending: bool,
     #[rust]
@@ -410,13 +409,7 @@ impl ArticlePanel {
     fn editable(&self) -> bool {
         self.allowed() && !self.reader_only
     }
-    fn checkpoint(&mut self) {
-        self.undo.push(self.doc.clone());
-        if self.undo.len() > 100 {
-            self.undo.remove(0);
-        }
-        self.redo.clear();
-    }
+    fn checkpoint(&mut self) { self.history.checkpoint(&self.doc); }
     fn changed(&mut self, cx: &mut Cx) {
         self.doc.modified = now();
         self.dirty = true;
@@ -650,8 +643,7 @@ impl ArticlePanel {
         self.doc = Document::default();
         self.selected_publication = None;
         self.operation = None;
-        self.undo.clear();
-        self.redo.clear();
+        self.history.clear();
         self.bind(cx);
         self.save(cx);
         self.show(cx, Page::Edit);
@@ -672,9 +664,9 @@ impl ArticlePanel {
         } else if let Some(path) = self
             .grant
             .as_ref()
-            .and_then(|g| storage::asset_path(crate::app_data_dir(), g, id).ok())
+            .and_then(|g| storage::asset_bytes(crate::app_data_dir(), g, id).ok())
         {
-            widget.load_image_file_by_path(cx, &path)
+            widget.load_image_from_data(cx, &path)
         } else {
             return;
         };
@@ -1008,7 +1000,8 @@ impl ArticlePanel {
         } else if let Some(op) = self.operation.clone() {
             spawn_async_task(async move {
                 let instance = grant.instance.clone();
-                let result = backend::execute(client, grant, op).await;
+                use article_core::host::ArticlePublisher;
+                let result = super::host::RobrixPublisher.publish(grant.lease, op).await;
                 Cx::post_action(ResultAction::Published { instance, result });
             });
         } else {
@@ -1285,8 +1278,7 @@ impl Widget for ArticlePanel {
                                         .iter()
                                         .find(|o| !o.finished && o.document.id == id)
                                         .cloned();
-                                    self.undo.clear();
-                                    self.redo.clear();
+                                    self.history.clear();
                                     self.bind(cx);
                                     if let Some(operation) = self.operation.clone() {
                                         self.doc = operation.document.clone();
@@ -1456,17 +1448,13 @@ impl Widget for ArticlePanel {
                     self.changed(cx);
                 }
                 if self.button(cx, ids!(article_undo)).clicked(actions) {
-                    if let Some(previous) = self.undo.pop() {
-                        self.redo.push(self.doc.clone());
-                        self.doc = previous;
+                    if self.history.undo(&mut self.doc) {
                         self.bind(cx);
                         self.changed(cx);
                     }
                 }
                 if self.button(cx, ids!(article_redo)).clicked(actions) {
-                    if let Some(next) = self.redo.pop() {
-                        self.undo.push(self.doc.clone());
-                        self.doc = next;
+                    if self.history.redo(&mut self.doc) {
                         self.bind(cx);
                         self.changed(cx);
                     }
@@ -2001,27 +1989,8 @@ impl Widget for ArticlePanel {
                                     BlockKind::Quote | BlockKind::Bullet | BlockKind::Numbered
                                 ),
                             );
-                            let size = match block.kind {
-                                BlockKind::Heading2 => 20.0,
-                                BlockKind::Heading3 => 17.0,
-                                _ => {
-                                    if self.doc.large_type {
-                                        16.0
-                                    } else {
-                                        14.0
-                                    }
-                                }
-                            };
-                            let mut input = row.article_rich_input(cx, ids!(rich));
-                            let (_, ink, accent) = self.doc.theme.colors();
-                            let ink = color(if block.kind == BlockKind::Quote {
-                                accent
-                            } else {
-                                ink
-                            });
-                            let spacing = if self.doc.compact { 1.0 } else { 1.25 };
-                            script_apply_eval!(cx,input,{draw_text +: {color: #(ink) color_focus: #(ink) color_hover: #(ink) text_style +: {line_spacing: #(spacing)}}});
-                            input.set_block(cx, block, size);
+                            let input = row.article_rich_input(cx, ids!(rich));
+                            article_makepad::presentation::style_input(cx, input, &self.doc, block);
                         }
                         row.draw_all(cx, &mut Scope::empty());
                     } else if reader {
@@ -2077,18 +2046,7 @@ impl Widget for ArticlePanel {
                                 .set_text(cx, block.map(|b| b.caption.as_str()).unwrap_or(""));
                         } else if let Some(block) = block {
                             let mut html = row.html(cx, ids!(body));
-                            let (_, ink, _) = self.doc.theme.colors();
-                            let ink = color(ink);
-                            let size = if self.doc.large_type { 16.0 } else { 14.0 };
-                            let spacing = if self.doc.compact { 1.0 } else { 1.25 };
-                            script_apply_eval!(cx,html,{
-                                font_size: #(size) font_color: #(ink)
-                                draw_text +: {color: #(ink)}
-                                text_style_normal +: {line_spacing: #(spacing)}
-                                text_style_bold +: {line_spacing: #(spacing)}
-                                text_style_italic +: {line_spacing: #(spacing)}
-                                text_style_bold_italic +: {line_spacing: #(spacing)}
-                            });
+                            article_makepad::presentation::style_html(cx, html.clone(), &self.doc);
                             html.set_text(cx, &block.html());
                         }
                         row.draw_all(cx, &mut Scope::empty());
@@ -2155,24 +2113,7 @@ impl Widget for ArticlePanel {
         DrawStep::done()
     }
 }
-fn crop_cover(bytes: &[u8], cover: &Cover, square: bool) -> Result<Vec<u8>, String> {
-    let image = ::image::load_from_memory(bytes).map_err(|e| e.to_string())?;
-    let ratio = if square { 1.0 } else { 2.35 };
-    let (w, h) = (image.width(), image.height());
-    let (cw, ch) = if w as f64 / h as f64 > ratio {
-        ((h as f64 * ratio) as u32, h)
-    } else {
-        (w, (w as f64 / ratio) as u32)
-    };
-    let x = ((w - cw) as f64 * cover.focal_x as f64 / 1000.0) as u32;
-    let y = ((h - ch) as f64 * cover.focal_y as f64 / 1000.0) as u32;
-    let cropped = image.crop_imm(x, y, cw.max(1), ch.max(1));
-    let mut output = std::io::Cursor::new(Vec::new());
-    cropped
-        .write_to(&mut output, ::image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-    Ok(output.into_inner())
-}
+use article_core::assets::crop_cover;
 impl ArticlePanelRef {
     pub fn action(&self, cx: &mut Cx, modal: ModalRef, action: &ArticleAction) {
         let Some(mut panel) = self.borrow_mut() else {
@@ -2200,7 +2141,7 @@ impl ArticlePanelRef {
                 modal.open(cx);
                 if let ArticleAction::Read { room, event } = action {
                     if let (Some(owner), Some(client)) = (current_user_id(), get_client()) {
-                        let grant = Grant::new(owner);
+                        let grant = Grant::reader(owner);
                         let instance = grant.instance.clone();
                         panel.grant = Some(grant.clone());
                         panel.pending = true;
