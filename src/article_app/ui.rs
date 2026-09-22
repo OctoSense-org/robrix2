@@ -55,7 +55,7 @@ enum ResultAction {
     CssPreview {
         instance: String,
         request: String,
-        result: Result<std::sync::Arc<makepad_html_renderer::RenderedDocument>, String>,
+        result: Result<super::preview::Update, String>,
     },
     Image {
         instance: String,
@@ -296,7 +296,7 @@ script_mod! {
             preview_check := mod.widgets.ArticlePrimary {text: #(crate::i18n::tr("Publication review")) i18n_text: "Publication review"}
         }
         css_preview := View {visible: false width: Fill height: Fill flow: Down padding: 20 spacing: 10
-            mod.widgets.ArticleLabel {text: #(crate::i18n::tr("Static layout preview. Return to the native view to edit, select text or open links.")) i18n_text: "Static layout preview. Return to the native view to edit, select text or open links."}
+            mod.widgets.ArticleLabel {text: #(crate::i18n::tr("Tap links to open them. Return to the editor to edit or select text.")) i18n_text: "Tap links to open them. Return to the editor to edit or select text."}
             css_preview_refresh := mod.widgets.ArticleButton {text: #(crate::i18n::tr("Refresh preview")) i18n_text: "Refresh preview"}
             css_preview_bitmap := mod.widgets.HtmlView {}
         }
@@ -384,6 +384,9 @@ pub struct ArticlePanel {
     viewport_width: f64,
     #[rust]
     css_request: String,
+    #[cfg(feature = "html_preview")]
+    #[rust]
+    css_session: Option<super::preview::PreviewSession>,
     #[rust]
     pending: bool,
     #[rust]
@@ -431,15 +434,15 @@ impl ArticlePanel {
         let request = self.css_request.clone();
         let instance = grant.instance.clone();
         let document = self.doc.clone();
+        self.css_session.take();
         self.pending = true;
         self.show(cx, Page::CssPreview);
         self.html_view(cx, ids!(css_preview_bitmap)).clear(cx);
+        self.html_view(cx, ids!(css_preview_bitmap)).scroll_to(cx, 0.0);
         self.status(cx, "Rendering HTML/CSS preview…");
-        spawn_async_task(async move {
-            let result = tokio::task::spawn_blocking(move || super::preview::render(document, grant, options))
-                .await.map_err(|_| "Unable to render HTML/CSS preview.".to_string()).and_then(|r|r);
-            Cx::post_action(ResultAction::CssPreview { instance, request, result });
-        });
+        self.css_session = Some(super::preview::start(document, grant, options, move |result| {
+            Cx::post_action(ResultAction::CssPreview { instance: instance.clone(), request: request.clone(), result });
+        }));
     }
     fn status(&self, cx: &mut Cx, s: &str) {
         self.label(cx, ids!(article_status)).set_text(cx, tr(s));
@@ -535,6 +538,13 @@ impl ArticlePanel {
         self.view.redraw(cx);
     }
     fn show(&mut self, cx: &mut Cx, page: Page) {
+        #[cfg(feature = "html_preview")]
+        if self.page == Page::CssPreview && page != Page::CssPreview {
+            self.css_session.take();
+            self.css_request.clear();
+            self.pending = false;
+            self.html_view(cx, ids!(css_preview_bitmap)).clear(cx);
+        }
         self.page = page;
         self.button(cx, ids!(article_done)).set_visible(
             cx,
@@ -1166,13 +1176,25 @@ impl Widget for ArticlePanel {
                         if *request != self.css_request || self.page != Page::CssPreview || !self.allowed() { continue; }
                         self.pending = false;
                         match result {
-                            Ok(bitmap) => {
+                            Ok(super::preview::Update::Rendered(bitmap)) => {
                                 self.html_view(cx, ids!(css_preview_bitmap)).set_rendered(cx, bitmap);
                                 self.status(cx, if bitmap.clipped {
                                     "Preview reached its length limit. Return to Full preview to read the entire article."
                                 } else { "HTML/CSS preview ready" });
                             }
-                            Err(error) => self.status(cx, error),
+                            Ok(super::preview::Update::Interaction(action)) => match action {
+                                makepad_html_renderer::HtmlAction::OpenLink { url } => {
+                                    if validate_link(url).is_ok() { crate::utils::open_url(url); }
+                                }
+                                makepad_html_renderer::HtmlAction::ScrollTo { y_css } => {
+                                    self.html_view(cx, ids!(css_preview_bitmap)).scroll_to(cx, *y_css);
+                                }
+                                _ => (),
+                            },
+                            Err(error) => {
+                                self.css_session.take();
+                                self.status(cx, error);
+                            }
                         }
                     }
                     ResultAction::Image {
@@ -1272,6 +1294,17 @@ impl Widget for ArticlePanel {
             }
             if self.pending {
                 return;
+            }
+            #[cfg(feature = "html_preview")]
+            if self.page == Page::CssPreview && self.allowed() {
+                let view = self.html_view(cx, ids!(css_preview_bitmap));
+                if let Some(session) = &self.css_session {
+                    if let Some((x, y)) = view.activation(actions) {
+                        self.pending = session.activate(x, y);
+                    } else if let Some((x, y, delta)) = view.horizontal_scroll(actions) {
+                        self.pending = session.scroll_horizontal(x, y, delta);
+                    }
+                }
             }
             #[cfg(feature = "html_preview")]
             if (self.page == Page::Preview && self.button(cx, ids!(css_preview_open)).clicked(actions))
@@ -2203,6 +2236,8 @@ impl ArticlePanelRef {
                 }
                 panel.css_request.clear();
                 #[cfg(feature = "html_preview")]
+                panel.css_session.take();
+                #[cfg(feature = "html_preview")]
                 panel.html_view(cx, ids!(css_preview_bitmap)).clear(cx);
                 panel.active = true;
                 panel.owner = current_user_id();
@@ -2244,6 +2279,8 @@ impl ArticlePanelRef {
                     g.revoke()
                 }
                 panel.css_request.clear();
+                #[cfg(feature = "html_preview")]
+                panel.css_session.take();
                 #[cfg(feature = "html_preview")]
                 panel.html_view(cx, ids!(css_preview_bitmap)).clear(cx);
                 panel.active = false;

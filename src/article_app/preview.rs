@@ -1,8 +1,12 @@
 //! Optional preview of validated structured articles. No raw public HTML import.
-use makepad_html_renderer::{RenderedDocument, RenderOptions, ResourceMap};
+use makepad_html_renderer::{DocumentSession, HtmlAction, RenderedDocument, RenderOptions, ResourceMap};
 use article_core::{assets::crop_cover, document::*, host::Capability};
 use super::{model::Grant, storage};
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{
+    Arc, Mutex, TryLockError,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 
 static RENDERING: Mutex<()> = Mutex::new(());
 
@@ -60,36 +64,295 @@ figure{{margin:20px auto;text-align:center}} figure img{{width:100%;max-width:10
     Ok((html, resources))
 }
 
-pub fn render(
-    document: Document,
-    grant: Grant,
-    options: RenderOptions,
-) -> Result<Arc<RenderedDocument>, String> {
-    // At most one expensive render runs in this process. Closing/reopening the
-    // app cannot create an unbounded queue of CPU render jobs.
+#[derive(Clone, Debug)]
+pub enum Update {
+    Rendered(Arc<RenderedDocument>),
+    Interaction(HtmlAction),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Input {
+    Activate(f32, f32),
+    Scroll(f32, f32, f32),
+}
+
+/// The UI owns this handle, never the DOM or Matrix credentials. Dropping it
+/// cancels pending output and disconnects the worker's bounded event queue.
+pub struct PreviewSession {
+    sender: mpsc::SyncSender<Input>,
+    active: Arc<AtomicBool>,
+}
+impl Drop for PreviewSession {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+impl PreviewSession {
+    pub fn activate(&self, x: f32, y: f32) -> bool {
+        self.sender.try_send(Input::Activate(x, y)).is_ok()
+    }
+    pub fn scroll_horizontal(&self, x: f32, y: f32, delta: f32) -> bool {
+        self.sender.try_send(Input::Scroll(x, y, delta)).is_ok()
+    }
+}
+
+fn guarded<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    // At most one expensive render runs. A backend panic is an error for this
+    // disposable session; a later preview must remain usable.
     let _lock = match RENDERING.try_lock() {
         Ok(guard) => guard,
         Err(TryLockError::WouldBlock) => {
             return Err("Another article preview is still rendering.".into());
         }
-        // Only a concurrency permit is protected. A failed worker has no
-        // reusable document state and must not disable future previews.
         Err(TryLockError::Poisoned(error)) => error.into_inner(),
     };
-    grant.authorize(Capability::ReadDrafts)?;
-    let (html, resources) = bundle(&document, |id| {
-        storage::asset_bytes(crate::app_data_dir(), &grant, id)
-    })?;
-    grant.authorize(Capability::ReadDrafts)?;
-    let result =
-        makepad_html_renderer::render_html(&html, options, &resources).map_err(|e| e.to_string())?;
-    grant.authorize(Capability::ReadDrafts)?;
-    Ok(Arc::new(result))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("Unable to render HTML/CSS preview.".into()))
+}
+
+fn start_worker(
+    build: impl FnOnce() -> Result<DocumentSession, String> + Send + 'static,
+    authorize: impl Fn() -> Result<(), String> + Send + 'static,
+    emit: impl Fn(Result<Update, String>) + Send + 'static,
+) -> PreviewSession {
+    let (sender, receiver) = mpsc::sync_channel(4);
+    let active = Arc::new(AtomicBool::new(true));
+    let alive = active.clone();
+    std::thread::spawn(move || {
+        let publish = |update| {
+            if alive.load(Ordering::Acquire) && authorize().is_ok() {
+                emit(update);
+            }
+        };
+        let initial = guarded(|| {
+            authorize()?;
+            if !alive.load(Ordering::Acquire) {
+                return Err("Preview closed".into());
+            }
+            let mut session = build()?;
+            let bitmap = session.render().map_err(|e| e.to_string())?;
+            Ok((session, bitmap))
+        });
+        let mut session = match initial {
+            Ok((session, bitmap)) => {
+                publish(Ok(Update::Rendered(Arc::new(bitmap))));
+                session
+            }
+            Err(error) => {
+                publish(Err(error));
+                return;
+            }
+        };
+        while alive.load(Ordering::Acquire) {
+            if authorize().is_err() {
+                break;
+            }
+            let input = match receiver.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(input) => input,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            let result = guarded(|| {
+                authorize()?;
+                if !alive.load(Ordering::Acquire) {
+                    return Err("Preview closed".into());
+                }
+                let action = match input {
+                    Input::Activate(x, y) => session.activate(x, y),
+                    Input::Scroll(x, y, delta) => {
+                        if session.scroll_horizontal(x, y, delta) {
+                            HtmlAction::DocumentChanged
+                        } else {
+                            HtmlAction::None
+                        }
+                    }
+                };
+                if action == HtmlAction::DocumentChanged {
+                    session
+                        .render()
+                        .map(|bitmap| Update::Rendered(Arc::new(bitmap)))
+                        .map_err(|e| e.to_string())
+                } else {
+                    Ok(Update::Interaction(action))
+                }
+            });
+            let failed = result.is_err();
+            publish(result);
+            if failed {
+                break;
+            } // Never reuse DOM state after a backend failure.
+        }
+    });
+    PreviewSession { sender, active }
+}
+
+pub fn start(
+    document: Document,
+    grant: Grant,
+    options: RenderOptions,
+    emit: impl Fn(Result<Update, String>) + Send + 'static,
+) -> PreviewSession {
+    let authority = grant.clone();
+    start_worker(
+        move || {
+            grant.authorize(Capability::ReadDrafts)?;
+            let (html, resources) = bundle(&document, |id| {
+                storage::asset_bytes(crate::app_data_dir(), &grant, id)
+            })?;
+            grant.authorize(Capability::ReadDrafts)?;
+            DocumentSession::new(&html, options, &resources).map_err(|e| e.to_string())
+        },
+        move || authority.authorize(Capability::ReadDrafts),
+        emit,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    static WORKER_TEST: Mutex<()> = Mutex::new(());
+
+    fn test_document() -> Result<DocumentSession, String> {
+        DocumentSession::new(
+            "<!doctype html><style>body{margin:0;font:20px/40px Arial}a,summary{display:block}</style><a href='https://example.com/article'>Article link</a><details><summary>Expand</summary><p>Revealed content</p></details>",
+            RenderOptions { width_css: 300, scale: 1.0, ..Default::default() },
+            &ResourceMap::default(),
+        ).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn worker_delivers_links_and_disclosure_rerenders() {
+        let _serial = WORKER_TEST.lock().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let worker = start_worker(
+            test_document,
+            || Ok(()),
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        let Update::Rendered(initial) = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("initial bitmap missing")
+        };
+        assert!(worker.activate(20., 20.));
+        assert!(
+            matches!(rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap(), Update::Interaction(HtmlAction::OpenLink { url }) if url == "https://example.com/article")
+        );
+        assert!(worker.activate(20., 60.));
+        let Update::Rendered(expanded) = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("disclosure did not rerender")
+        };
+        assert!(expanded.css_content_height > initial.css_content_height);
+        drop(worker);
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn canceled_and_revoked_workers_cannot_deliver_results() {
+        let _serial = WORKER_TEST.lock().unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let worker = start_worker(
+            move || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv().unwrap();
+                test_document()
+            },
+            || Ok(()),
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        drop(worker);
+        resume_tx.send(()).unwrap();
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+
+        let valid = Arc::new(AtomicBool::new(true));
+        let authority = valid.clone();
+        let (tx, rx) = mpsc::channel();
+        let worker = start_worker(
+            test_document,
+            move || {
+                if authority.load(Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err("revoked".into())
+                }
+            },
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .is_ok()
+        );
+        valid.store(false, Ordering::Release);
+        worker.activate(20., 20.);
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+        drop(worker);
+    }
+
+    #[test]
+    fn backend_panic_is_reported_and_next_preview_still_works() {
+        let _serial = WORKER_TEST.lock().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let worker = start_worker(
+            || panic!("simulated renderer failure"),
+            || Ok(()),
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .unwrap_err(),
+            "Unable to render HTML/CSS preview."
+        );
+        drop(worker);
+        let (tx, rx) = mpsc::channel();
+        let worker = start_worker(
+            test_document,
+            || Ok(()),
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .unwrap(),
+            Update::Rendered(_)
+        ));
+        drop(worker);
+        assert!(matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+    }
     #[test]
     fn preview_only_generates_escaped_html_from_validated_document() {
         let mut doc = Document::from_markdown("<script>title</script>", "你好 **世界**").unwrap();
@@ -99,7 +362,8 @@ mod tests {
         assert!(!html.contains("<script>"));
         assert!(!html.contains("<img src=file:"));
         let bitmap =
-            makepad_html_renderer::render_html(&html, RenderOptions::default(), &resources).unwrap();
+            makepad_html_renderer::render_html(&html, RenderOptions::default(), &resources)
+                .unwrap();
         assert!(bitmap.resources.denied.is_empty());
         assert!(!bitmap.clipped);
     }

@@ -937,7 +937,7 @@
   "This chat is not available.": "This chat is not available.",
   "Chat encryption changed. Review the publication again.": "Chat encryption changed. Review the publication again.",
   "HTML/CSS preview (experimental)": "HTML/CSS preview (experimental)",
-  "Static layout preview. Return to the native view to edit, select text or open links.": "Static layout preview. Return to the native view to edit, select text or open links.",
+  "Tap links to open them. Return to the editor to edit or select text.": "Tap links to open them. Return to the editor to edit or select text.",
   "Refresh preview": "Refresh preview",
   "Preview reached its length limit. Return to Full preview to read the entire article.": "Preview reached its length limit. Return to Full preview to read the entire article.",
   "HTML/CSS preview ready": "HTML/CSS preview ready",

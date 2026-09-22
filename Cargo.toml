@@ -16,7 +16,7 @@ metadata.makepad-auto-version = "zqpv-Yj-K7WNVK2I8h5Okhho46Q="
 [dependencies]
 article-core = { path = "crates/article-core", features = ["l0"] }
 article-makepad = { path = "crates/article-makepad" }
-makepad-html-renderer = { package = "makepad-html", git = "https://github.com/OctoSense-org/makepad-html", rev = "86892f449cd00a8998bec2d1667a67a53d9cf408", optional = true, features = ["makepad"] }
+makepad-html-renderer = { package = "makepad-html", git = "https://github.com/OctoSense-org/makepad-html", rev = "b16565ae1e56dd7c3a87f00455ae327df599ca3b", optional = true, features = ["makepad"] }
 # makepad-widgets = { git = "https://github.com/makepad/makepad", branch = "dev", features = ["serde"] }
 # makepad-code-editor = { git = "https://github.com/makepad/makepad", branch = "dev" }
 
@@ -135,7 +135,7 @@ webpki-root-certs = "1"
 
 
 [features]
-default = []
+default = ["html_preview"]
 ## Experimental CPU HTML/CSS article preview; the native editor stays available.
 html_preview = ["dep:makepad-html-renderer"]
 # Compatibility for existing Robrix build commands.

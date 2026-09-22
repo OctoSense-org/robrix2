@@ -826,7 +826,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -835,7 +835,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408)",
+ "debug_timer 0.1.3 (git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b)",
  "euclid",
  "html-escape",
  "image",
@@ -866,7 +866,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -877,7 +877,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "anyrender",
  "blitz-dom",
@@ -896,7 +896,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.1",
@@ -1855,7 +1855,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 
 [[package]]
 name = "decancer"
@@ -3930,7 +3930,7 @@ dependencies = [
 [[package]]
 name = "makepad-html"
 version = "0.1.0"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -5250,8 +5250,7 @@ checksum = "4b6937eda350acc1a5d05872c3cbf99fe78619c269096e2be3d4a350058639d5"
 [[package]]
 name = "parley"
 version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22d2ff88bd3f7d68d1d9b09c7e6209f9a8e8c05088295140a2bcf2e9b17038c5"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "fontique",
  "harfrust",
@@ -7585,7 +7584,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/OctoSense-org/makepad-html?rev=86892f449cd00a8998bec2d1667a67a53d9cf408#86892f449cd00a8998bec2d1667a67a53d9cf408"
+source = "git+https://github.com/OctoSense-org/makepad-html?rev=b16565ae1e56dd7c3a87f00455ae327df599ca3b#b16565ae1e56dd7c3a87f00455ae327df599ca3b"
 dependencies = [
  "bitflags 2.13.1",
  "stylo",

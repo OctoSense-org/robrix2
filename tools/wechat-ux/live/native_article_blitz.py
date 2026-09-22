@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import time
 import uuid
 
@@ -28,6 +29,11 @@ def main():
     (root / "profile/ui-language.json").write_text('"zh-CN"')
     report = {"passed": False, "checks": [], "runs": [], "system_file_picker_tested": False}
     app = None
+
+    def free_port():
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            return listener.getsockname()[1]
 
     def mark(name):
         report["checks"].append(name)
@@ -56,7 +62,7 @@ def main():
         app.click_id("source_apply")
 
     try:
-        app = NativeApp(root, 8363, size=(430, 820))
+        app = NativeApp(root, free_port(), size=(430, 820))
         app.start()
         report["runs"].append(str(app.output))
         app.wait_text("全部聊天", timeout=90)
@@ -92,6 +98,7 @@ def main():
         app.click_id("article_preview")
         app.click_id("css_preview_open")
         app.wait_text("HTML/CSS 排版预览已就绪", timeout=60)
+        app.wait_text("轻点链接即可打开")
         app.wait_text("山野来信", pixels=True)
         app.capture("mobile-top")
         app.request("/m", k="scroll", x=210, y=490, dy=4000, wait=1)
@@ -116,7 +123,7 @@ def main():
         app = None
 
         (root / "profile/ui-language.json").write_text('"en"')
-        app = NativeApp(root, 8363, size=(1440, 960))
+        app = NativeApp(root, free_port(), size=(1440, 960))
         app.start()
         report["runs"].append(str(app.output))
         app.wait_text("All Chats", timeout=90)
@@ -129,6 +136,15 @@ def main():
         app.capture("desktop-top")
         app.click_id("css_preview_refresh")
         app.wait_text("HTML/CSS preview ready", timeout=60)
+        app.click_id("css_preview_refresh")
+        app.click_id("article_back")
+        app.wait_text("Full preview")
+        time.sleep(.5)
+        assert not any(w["i"] == "css_preview_refresh" for w in app.snap())
+        app.click_id("css_preview_open")
+        app.wait_text("HTML/CSS preview ready", timeout=60)
+        app.wait_text("Tap links to open them")
+        mark("refresh_back_discards_old_session_and_reopen_renders")
         app.click_id("article_back")
         app.wait_text("Full preview")
         app.click_id("article_close")
